@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    uses: KSPModdingLibs/KSPBuildTools/.github/workflows/build.yml@1.1.1
+    with:
+      solution-file-path: InjectionVelocityIndicator.sln
+      dotnet-version: 10.x
+      use-ckan: true
+      dependency-identifiers: Harmony2
+      artifacts: GameData/InjectionVelocityIndicator/Plugins LICENSE README.md CHANGELOG.md CKAN
+
+  unit-tests:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.x
+
+      - name: Run unit tests
+        run: dotnet run --project tests/InjectionVelocityIndicator.Tests --configuration Release
+
+  metadata:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Validate NetKAN metadata
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          metadata = json.loads(Path('CKAN/InjectionVelocityIndicator.netkan').read_text())
+          assert metadata['identifier'] == 'InjectionVelocityIndicator'
+          assert metadata['$kref'] == '#/ckan/github/Pzixel/injection-velocity-indicator'
+          assert metadata['$vref'] == '#/ckan/ksp-avc'
+          assert metadata['depends'] == [{'name': 'Harmony2'}]
+          assert metadata['install'] == [
+              {'find': 'InjectionVelocityIndicator', 'install_to': 'GameData'}
+          ]
+          PY
+
+      - name: Validate KSP-AVC template JSON
+        shell: bash
+        run: |
+          sed \
+            -e 's/@VERSION_MAJOR@/1/g' \
+            -e 's/@VERSION_MINOR@/0/g' \
+            -e 's/@VERSION_PATCH@/0/g' \
+            GameData/InjectionVelocityIndicator/InjectionVelocityIndicator.versiontemplate \
+            | python -m json.tool > /dev/null
+
+      - name: Reject bundled Harmony
+        shell: bash
+        run: |
+          if find GameData -iname '0Harmony.dll' | grep -q .; then
+            echo '0Harmony.dll must be provided by the Harmony2 dependency, not bundled.' >&2
+            exit 1
+          fi

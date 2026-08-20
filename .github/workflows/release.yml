@@ -1,0 +1,135 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Semantic version without a leading v (for example, 1.0.0)
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.ref == 'refs/heads/master'
+    runs-on: ubuntu-22.04
+    env:
+      KSP_ROOT: /tmp/ksp
+      RELEASE_STAGING: /tmp/release
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.x
+
+      - name: Validate version input
+        shell: bash
+        run: |
+          if [[ ! '${{ inputs.version }}' =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo 'Version must use MAJOR.MINOR.PATCH format.' >&2
+            exit 1
+          fi
+          echo 'VERSION_STRING=${{ inputs.version }}' >> "$GITHUB_ENV"
+          echo 'RELEASE_TAG=v${{ inputs.version }}' >> "$GITHUB_ENV"
+
+      - name: Update version files and changelog
+        id: version
+        uses: KSPModdingLibs/KSPBuildTools/.github/actions/update-version@1.1.1
+        with:
+          version-string: ${{ inputs.version }}
+          files: >-
+            GameData/InjectionVelocityIndicator/InjectionVelocityIndicator.versiontemplate
+            src/InjectionVelocityIndicator/Properties/AssemblyInfo.cs.versiontemplate
+          changelog-input-file: CHANGELOG.md
+
+      - name: Commit release version
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m "Release ${VERSION_STRING}"
+
+      - name: Set up CKAN
+        uses: KSPModdingLibs/KSPBuildTools/.github/actions/setup-ckan@1.1.1
+
+      - name: Install build-only Harmony2 dependency
+        uses: KSPModdingLibs/KSPBuildTools/.github/actions/install-dependencies@1.1.1
+        with:
+          dependency-identifiers: Harmony2
+
+      - name: Compile Release
+        uses: KSPModdingLibs/KSPBuildTools/.github/actions/compile@1.1.1
+        with:
+          build-configuration: Release
+          solution-file-path: InjectionVelocityIndicator.sln
+
+      - name: Run unit tests
+        shell: bash
+        run: dotnet run --project tests/InjectionVelocityIndicator.Tests --configuration Release --no-build
+
+      - name: Assemble release ZIP
+        id: package
+        shell: bash
+        run: |
+          package_root="$RELEASE_STAGING/package"
+          release_zip="$GITHUB_WORKSPACE/InjectionVelocityIndicator-${VERSION_STRING}.zip"
+          mkdir -p "$package_root/GameData/InjectionVelocityIndicator/Plugins"
+          cp GameData/InjectionVelocityIndicator/Plugins/InjectionVelocityIndicator.dll \
+            "$package_root/GameData/InjectionVelocityIndicator/Plugins/"
+          cp GameData/InjectionVelocityIndicator/InjectionVelocityIndicator.version \
+            "$package_root/GameData/InjectionVelocityIndicator/"
+          cp LICENSE README.md CHANGELOG.md "$package_root/"
+          (
+            cd "$package_root"
+            zip -r "$release_zip" GameData LICENSE README.md CHANGELOG.md
+          )
+          echo "artifact-zip-path=$release_zip" >> "$GITHUB_OUTPUT"
+
+      - name: Verify release contents
+        shell: bash
+        env:
+          RELEASE_ZIP: ${{ steps.package.outputs.artifact-zip-path }}
+        run: |
+          unzip -Z1 "$RELEASE_ZIP" > /tmp/release-files.txt
+          grep -Fx 'GameData/InjectionVelocityIndicator/Plugins/InjectionVelocityIndicator.dll' /tmp/release-files.txt
+          grep -Fx 'GameData/InjectionVelocityIndicator/InjectionVelocityIndicator.version' /tmp/release-files.txt
+          grep -Fx 'LICENSE' /tmp/release-files.txt
+          if grep -iE '(^|/)0Harmony\.dll$' /tmp/release-files.txt; then
+            echo 'Release must not bundle Harmony.' >&2
+            exit 1
+          fi
+
+      - name: Upload verified release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: InjectionVelocityIndicator-${{ inputs.version }}
+          path: ${{ steps.package.outputs.artifact-zip-path }}
+          if-no-files-found: error
+
+      - name: Push release commit
+        shell: bash
+        run: git push origin HEAD:master
+
+      - name: Publish GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_ZIP: ${{ steps.package.outputs.artifact-zip-path }}
+          RELEASE_NOTES: ${{ steps.version.outputs.release-notes-output-file }}
+        run: >-
+          gh release create "$RELEASE_TAG" "$RELEASE_ZIP"
+          --target master
+          --title "Injection Velocity Indicator ${VERSION_STRING}"
+          --notes-file "$RELEASE_NOTES"

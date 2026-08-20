@@ -1,6 +1,8 @@
 # Injection Velocity Indicator
 
-A KSP 1.12.5 mod that adds the target-relative speed to the stock planet closest-approach tooltip. 
+[![CI](https://github.com/Pzixel/injection-velocity-indicator/actions/workflows/ci.yml/badge.svg)](https://github.com/Pzixel/injection-velocity-indicator/actions/workflows/ci.yml)
+
+A KSP 1.12.5 mod that adds the target-relative speed to the stock planet closest-approach tooltip.
 
 ## TDLR
 
@@ -43,3 +45,11 @@ Copy the `InjectionVelocityIndicator` directory into the game's existing `GameDa
 To uninstall, delete only `GameData/InjectionVelocityIndicator`. The mod never installs files into another mod's directory.
 
 Principia is detected at startup and disables this feature because its displayed trajectory is not represented by KSP's stock patched-conic `Orbit` data.
+
+## Releases and CKAN
+
+CI builds every push and pull request against stripped KSP 1.12.5 interfaces. Harmony2 is installed into the CI runner as a build-only dependency and is never included in artifacts.
+
+Maintainers publish a release from the GitHub Actions **Release** workflow by supplying a `MAJOR.MINOR.PATCH` version. The workflow updates the KSP-AVC version file and changelog, builds Release, verifies the ZIP contents, commits the release version, and publishes `InjectionVelocityIndicator-<version>.zip`.
+
+CKAN metadata is maintained in `CKAN/InjectionVelocityIndicator.netkan`. It uses GitHub releases as its source, reads KSP compatibility from the packaged `.version` file, installs only `GameData/InjectionVelocityIndicator`, and depends on `Harmony2`.
