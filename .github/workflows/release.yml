@@ -50,7 +50,7 @@ jobs:
         with:
           version-string: ${{ inputs.version }}
           files: >-
-            GameData/InjectionVelocityIndicator/InjectionVelocityIndicator.versiontemplate
+            GameData/InjectionVelocityIndicator/InjectionVelocityIndicator.version.versiontemplate
             src/InjectionVelocityIndicator/Properties/AssemblyInfo.cs.versiontemplate
           changelog-input-file: CHANGELOG.md
 

@@ -64,7 +64,7 @@ jobs:
             -e 's/@VERSION_MAJOR@/1/g' \
             -e 's/@VERSION_MINOR@/0/g' \
             -e 's/@VERSION_PATCH@/0/g' \
-            GameData/InjectionVelocityIndicator/InjectionVelocityIndicator.versiontemplate \
+            GameData/InjectionVelocityIndicator/InjectionVelocityIndicator.version.versiontemplate \
             | python -m json.tool > /dev/null
 
       - name: Reject bundled Harmony
