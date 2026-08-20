@@ -26,8 +26,8 @@ namespace InjectionVelocityIndicator
 
         [HarmonyPostfix]
         private static void Postfix(
-            OrbitTargeter.ClApprMarker __instance,
-            MapNode.CaptionData __1)
+            OrbitTargeter.ClApprMarker? __instance,
+            MapNode.CaptionData? __1)
         {
             if (__instance == null || __1 == null)
             {
@@ -47,15 +47,15 @@ namespace InjectionVelocityIndicator
     {
         private readonly OrbitTargeter.ClApprMarker marker;
 
-        private string cachedSeparationLine;
-        private CelestialBody cachedTargetBody;
+        private string? cachedSeparationLine;
+        private CelestialBody? cachedTargetBody;
         private OrbitStateFingerprint cachedTrajectory;
         private OrbitStateFingerprint cachedTarget;
         private bool hasCachedInputs;
         private bool hasRelativeSpeed;
-        private string relativeSpeedLine;
+        private string? relativeSpeedLine;
 
-        private string previousStockTimeLine;
+        private string? previousStockTimeLine;
         private bool ownsThirdLine;
         private bool calculationErrorLogged;
 
@@ -74,7 +74,7 @@ namespace InjectionVelocityIndicator
                 return;
             }
 
-            CelestialBody targetBody = FlightGlobals.fetch == null
+            CelestialBody? targetBody = FlightGlobals.fetch == null
                 ? null
                 : FlightGlobals.fetch.VesselTarget as CelestialBody;
 
@@ -83,13 +83,15 @@ namespace InjectionVelocityIndicator
                 return;
             }
 
-            Orbit trajectoryPatch;
-            Orbit targetPatch;
+            Orbit? trajectoryPatch;
+            Orbit? targetPatch;
 
             if (!OrbitTargeterPatchAccessor.TryGetCurrentPatches(
                 marker.orbitTargeter,
                 out trajectoryPatch,
-                out targetPatch))
+                out targetPatch) ||
+                trajectoryPatch is null ||
+                targetPatch is null)
             {
                 return;
             }
@@ -120,12 +122,12 @@ namespace InjectionVelocityIndicator
                 Recalculate(trajectoryPatch, targetPatch);
             }
 
-            if (!hasRelativeSpeed)
+            if (!hasRelativeSpeed || relativeSpeedLine is null)
             {
                 return;
             }
 
-            InsertRelativeSpeed(caption);
+            InsertRelativeSpeed(caption, relativeSpeedLine);
         }
 
         private void Recalculate(
@@ -191,7 +193,9 @@ namespace InjectionVelocityIndicator
             ownsThirdLine = false;
         }
 
-        private void InsertRelativeSpeed(MapNode.CaptionData caption)
+        private void InsertRelativeSpeed(
+            MapNode.CaptionData caption,
+            string speedLine)
         {
             // Match the stock vessel-rendezvous layout: separation, relative
             // speed, then time. This runs directly after stock regenerated the
@@ -201,14 +205,14 @@ namespace InjectionVelocityIndicator
                 previousStockTimeLine = caption.captionLine2;
                 ownsThirdLine = true;
                 caption.captionLine3 = caption.captionLine2;
-                caption.captionLine2 = relativeSpeedLine;
+                caption.captionLine2 = speedLine;
                 return;
             }
 
             // If another mod owns line 3, do not overwrite it.
             caption.captionLine1 = CaptionText.AppendInline(
                 caption.captionLine1,
-                relativeSpeedLine);
+                speedLine);
         }
     }
 }

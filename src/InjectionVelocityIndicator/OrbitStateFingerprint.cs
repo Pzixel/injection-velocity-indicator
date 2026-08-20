@@ -4,8 +4,8 @@ namespace InjectionVelocityIndicator
 {
     internal struct OrbitStateFingerprint : IEquatable<OrbitStateFingerprint>
     {
-        private Orbit orbit;
-        private CelestialBody referenceBody;
+        private Orbit? orbit;
+        private CelestialBody? referenceBody;
         private long startUt;
         private long endUt;
         private long closestApproachUt;
@@ -17,7 +17,7 @@ namespace InjectionVelocityIndicator
         private long epoch;
         private long meanAnomalyAtEpoch;
 
-        internal static OrbitStateFingerprint Capture(Orbit orbit)
+        internal static OrbitStateFingerprint Capture(Orbit? orbit)
         {
             return new OrbitStateFingerprint
             {

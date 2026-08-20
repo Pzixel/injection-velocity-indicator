@@ -6,7 +6,7 @@ namespace InjectionVelocityIndicator
     {
         private const string InlineSeparator = " · ";
 
-        internal static string AppendInline(string existing, string addition)
+        internal static string? AppendInline(string? existing, string? addition)
         {
             if (string.IsNullOrEmpty(existing))
             {
@@ -14,12 +14,12 @@ namespace InjectionVelocityIndicator
             }
 
             if (string.IsNullOrEmpty(addition) ||
-                existing.IndexOf(addition, StringComparison.Ordinal) >= 0)
+                existing!.IndexOf(addition!, StringComparison.Ordinal) >= 0)
             {
                 return existing;
             }
 
-            return existing + InlineSeparator + addition;
+            return existing! + InlineSeparator + addition!;
         }
     }
 }

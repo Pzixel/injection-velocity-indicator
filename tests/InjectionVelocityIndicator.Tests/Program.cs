@@ -53,7 +53,7 @@ namespace InjectionVelocityIndicator
             return 1;
         }
 
-        private static void Equal(string expected, string actual, string name)
+        private static void Equal(string? expected, string? actual, string name)
         {
             if (!string.Equals(expected, actual, StringComparison.Ordinal))
             {

@@ -3,8 +3,8 @@ namespace InjectionVelocityIndicator
     internal static class RelativeSpeedCalculator
     {
         internal static bool TryCalculate(
-            Orbit trajectoryPatch,
-            Orbit targetOrbit,
+            Orbit? trajectoryPatch,
+            Orbit? targetOrbit,
             out double relativeSpeed)
         {
             relativeSpeed = 0.0;
