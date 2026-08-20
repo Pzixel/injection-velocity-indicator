@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>7.3</LangVersion>
+    <Nullable>disable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\..\src\InjectionVelocityIndicator\NumericGuard.cs" Link="NumericGuard.cs" />
+    <Compile Include="..\..\src\InjectionVelocityIndicator\SpeedFormatter.cs" Link="SpeedFormatter.cs" />
+    <Compile Include="..\..\src\InjectionVelocityIndicator\CaptionText.cs" Link="CaptionText.cs" />
+  </ItemGroup>
+</Project>
+

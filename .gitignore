@@ -1,0 +1,6 @@
+**/bin/
+**/obj/
+.vs/
+GameData/InjectionVelocityIndicator/Plugins/*.dll
+GameData/InjectionVelocityIndicator/Plugins/*.pdb
+
