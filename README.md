@@ -1,5 +1,7 @@
 # Injection Velocity Indicator
 
+A KSP 1.12.5 mod that adds the target-relative speed to the stock planet closest-approach tooltip. 
+
 ## TDLR
 
 Before:
@@ -10,9 +12,6 @@ After:
 
 <img width="661" height="535" alt="image" src="https://github.com/user-attachments/assets/f2fb73f2-ebcb-4f6a-8f2e-e67925d1621d" />
 
-
-
-A KSP 1.12.5 mod that adds the target-relative speed to the stock planet closest-approach tooltip. 
 
 The calculation follows KSP's stock vessel-rendezvous logic: subtract the current trajectory and target patch orbital velocities at KSP's closest-approach UT, then display the magnitude using KSP's localized `Relative Speed` label.
 
