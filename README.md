@@ -12,11 +12,7 @@ After:
 
 
 
-A KSP 1.12.5 mod that adds the target-relative speed to the stock planet closest-approach tooltip. It uses the post-maneuver trajectory patch represented by the marker and does not create a separate window or overlay.
-
-The mod applies one narrow Harmony postfix to `OrbitTargeter.ClApprMarker.OnUpdateCaption`. KSP has already regenerated the stock separation and time text when the postfix runs. The mod then adds relative speed in the same three-line layout used by KSP's vessel-rendezvous marker.
-
-The expensive part is not run from `ClApprMarker.Update` or any map-position method. While a caption is hovered or pinned, the mod compares the stock separation text and a snapshot of the current trajectory/target orbit inputs. It recalculates only when one of those inputs changes, including maneuver-plan patch replacement or in-place orbital-element changes after a delta-v edit.
+A KSP 1.12.5 mod that adds the target-relative speed to the stock planet closest-approach tooltip. 
 
 The calculation follows KSP's stock vessel-rendezvous logic: subtract the current trajectory and target patch orbital velocities at KSP's closest-approach UT, then display the magnitude using KSP's localized `Relative Speed` label.
 
