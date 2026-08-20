@@ -2,8 +2,9 @@
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net10.0</TargetFramework>
-    <LangVersion>7.3</LangVersion>
-    <Nullable>disable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
   </PropertyGroup>
 
   <ItemGroup>
@@ -12,4 +13,3 @@
     <Compile Include="..\..\src\InjectionVelocityIndicator\CaptionText.cs" Link="CaptionText.cs" />
   </ItemGroup>
 </Project>
-
