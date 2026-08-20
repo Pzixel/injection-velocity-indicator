@@ -1,5 +1,15 @@
 # Injection Velocity Indicator
 
+TDLR
+
+Before
+<img width="687" height="376" alt="image" src="https://github.com/user-attachments/assets/3f38cb59-b52b-4be6-917b-6bcf97ff7151" />
+
+After:
+<img width="661" height="535" alt="image" src="https://github.com/user-attachments/assets/f2fb73f2-ebcb-4f6a-8f2e-e67925d1621d" />
+
+
+
 A KSP 1.12.5 mod that adds the target-relative speed to the stock planet closest-approach tooltip. It uses the post-maneuver trajectory patch represented by the marker and does not create a separate window or overlay.
 
 The mod applies one narrow Harmony postfix to `OrbitTargeter.ClApprMarker.OnUpdateCaption`. KSP has already regenerated the stock separation and time text when the postfix runs. The mod then adds relative speed in the same three-line layout used by KSP's vessel-rendezvous marker.
