@@ -1,11 +1,13 @@
 # Injection Velocity Indicator
 
-TDLR
+## TDLR
 
-Before
+Before:
+
 <img width="687" height="376" alt="image" src="https://github.com/user-attachments/assets/3f38cb59-b52b-4be6-917b-6bcf97ff7151" />
 
 After:
+
 <img width="661" height="535" alt="image" src="https://github.com/user-attachments/assets/f2fb73f2-ebcb-4f6a-8f2e-e67925d1621d" />
 
 
