@@ -2,7 +2,7 @@
 
 All notable changes to Injection Velocity Indicator are documented here.
 
-## Unreleased
+## 1.0.0 - 2026-08-20
 
 ### Added
 
