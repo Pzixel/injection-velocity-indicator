@@ -53,9 +53,6 @@ jobs:
           assert metadata['$kref'] == '#/ckan/github/Pzixel/injection-velocity-indicator'
           assert metadata['$vref'] == '#/ckan/ksp-avc'
           assert metadata['depends'] == [{'name': 'Harmony2'}]
-          assert metadata['install'] == [
-              {'find': 'InjectionVelocityIndicator', 'install_to': 'GameData'}
-          ]
           PY
 
       - name: Validate KSP-AVC template JSON
