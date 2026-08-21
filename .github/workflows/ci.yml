@@ -43,11 +43,12 @@ jobs:
       - name: Validate NetKAN metadata
         shell: bash
         run: |
+          python -m pip install --disable-pip-version-check --quiet PyYAML==6.0.3
           python - <<'PY'
-          import json
           from pathlib import Path
+          import yaml
 
-          metadata = json.loads(Path('CKAN/InjectionVelocityIndicator.netkan').read_text())
+          metadata = yaml.safe_load(Path('CKAN/InjectionVelocityIndicator.netkan').read_text())
           assert metadata['identifier'] == 'InjectionVelocityIndicator'
           assert metadata['$kref'] == '#/ckan/github/Pzixel/injection-velocity-indicator'
           assert metadata['$vref'] == '#/ckan/ksp-avc'
