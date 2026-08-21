@@ -49,9 +49,6 @@ namespace InjectionVelocityIndicator
 
         private string? cachedSeparationLine;
         private CelestialBody? cachedTargetBody;
-        private OrbitStateFingerprint cachedTrajectory;
-        private OrbitStateFingerprint cachedTarget;
-        private bool hasCachedInputs;
         private bool hasRelativeSpeed;
         private string? relativeSpeedLine;
 
@@ -83,43 +80,43 @@ namespace InjectionVelocityIndicator
                 return;
             }
 
-            Orbit? trajectoryPatch;
-            Orbit? targetPatch;
-
-            if (!OrbitTargeterPatchAccessor.TryGetCurrentPatches(
-                marker.orbitTargeter,
-                out trajectoryPatch,
-                out targetPatch) ||
-                trajectoryPatch is null ||
-                targetPatch is null)
-            {
-                return;
-            }
-
-            OrbitStateFingerprint trajectoryState =
-                OrbitStateFingerprint.Capture(trajectoryPatch);
-            OrbitStateFingerprint targetState =
-                OrbitStateFingerprint.Capture(targetPatch);
-
-            bool inputsChanged =
-                !hasCachedInputs ||
+            bool targetChanged =
+                !ReferenceEquals(cachedTargetBody, targetBody);
+            bool separationChanged =
                 !string.Equals(
                     cachedSeparationLine,
                     caption.captionLine1,
-                    StringComparison.Ordinal) ||
-                !ReferenceEquals(cachedTargetBody, targetBody) ||
-                !cachedTrajectory.Equals(trajectoryState) ||
-                !cachedTarget.Equals(targetState);
+                    StringComparison.Ordinal);
 
-            if (inputsChanged)
+            if (!hasRelativeSpeed || targetChanged || separationChanged)
             {
-                cachedSeparationLine = caption.captionLine1;
-                cachedTargetBody = targetBody;
-                cachedTrajectory = trajectoryState;
-                cachedTarget = targetState;
-                hasCachedInputs = true;
+                Orbit? trajectoryPatch;
+                Orbit? targetPatch;
+                string? calculatedLine;
 
-                Recalculate(trajectoryPatch, targetPatch);
+                if (OrbitTargeterPatchAccessor.TryGetCurrentPatches(
+                        marker.orbitTargeter,
+                        out trajectoryPatch,
+                        out targetPatch) &&
+                    TryCalculateLine(
+                        trajectoryPatch,
+                        targetPatch,
+                        out calculatedLine))
+                {
+                    cachedSeparationLine = caption.captionLine1;
+                    cachedTargetBody = targetBody;
+                    relativeSpeedLine = calculatedLine;
+                    hasRelativeSpeed = true;
+                }
+                else if (targetChanged)
+                {
+                    // Never show a value cached for a different target. For a
+                    // transient failure on the same target, retain the last
+                    // valid line and retry on the next stock caption update.
+                    cachedTargetBody = targetBody;
+                    relativeSpeedLine = null;
+                    hasRelativeSpeed = false;
+                }
             }
 
             if (!hasRelativeSpeed || relativeSpeedLine is null)
@@ -130,12 +127,12 @@ namespace InjectionVelocityIndicator
             InsertRelativeSpeed(caption, relativeSpeedLine);
         }
 
-        private void Recalculate(
-            Orbit trajectoryPatch,
-            Orbit targetPatch)
+        private bool TryCalculateLine(
+            Orbit? trajectoryPatch,
+            Orbit? targetPatch,
+            out string? calculatedLine)
         {
-            hasRelativeSpeed = false;
-            relativeSpeedLine = null;
+            calculatedLine = null;
 
             try
             {
@@ -145,23 +142,23 @@ namespace InjectionVelocityIndicator
                     targetPatch,
                     out relativeSpeed))
                 {
-                    return;
+                    return false;
                 }
 
                 string formattedSpeed = SpeedFormatter.Format(relativeSpeed);
-                relativeSpeedLine = Localizer.Format(
+                calculatedLine = Localizer.Format(
                     ModInfo.StockRelativeSpeedLocalizationTag,
                     formattedSpeed);
 
-                if (string.IsNullOrEmpty(relativeSpeedLine) ||
-                    relativeSpeedLine ==
+                if (string.IsNullOrEmpty(calculatedLine) ||
+                    calculatedLine ==
                         ModInfo.StockRelativeSpeedLocalizationTag)
                 {
-                    relativeSpeedLine =
+                    calculatedLine =
                         "Relative Speed: " + formattedSpeed + "m/s";
                 }
 
-                hasRelativeSpeed = true;
+                return true;
             }
             catch (Exception exception)
             {
@@ -172,6 +169,8 @@ namespace InjectionVelocityIndicator
                         "Could not calculate closest-approach relative speed; " +
                         "the stock caption was left unchanged. " + exception);
                 }
+
+                return false;
             }
         }
 

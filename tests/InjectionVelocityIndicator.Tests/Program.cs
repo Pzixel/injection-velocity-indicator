@@ -18,11 +18,13 @@ namespace InjectionVelocityIndicator
             Equal("N/A", SpeedFormatter.Format(double.PositiveInfinity), "infinite speed");
             Equal("N/A", SpeedFormatter.Format(-1.0), "negative speed");
 
-            True(NumericGuard.IsUsableUt(150.0, 100.0, 200.0), "UT within patch");
-            True(NumericGuard.IsUsableUt(150.0, 100.0, double.PositiveInfinity), "UT on final patch");
-            False(NumericGuard.IsUsableUt(99.0, 100.0, 200.0), "UT before patch");
-            False(NumericGuard.IsUsableUt(201.0, 100.0, 200.0), "UT after patch");
-            False(NumericGuard.IsUsableUt(0.0, 0.0, 200.0), "unset closest-approach UT");
+            True(NumericGuard.IsUsableUt(150.0), "finite closest-approach UT");
+            True(NumericGuard.IsUsableUt(-150.0), "past closest-approach UT");
+            False(NumericGuard.IsUsableUt(0.0), "unset closest-approach UT");
+            False(NumericGuard.IsUsableUt(double.NaN), "NaN closest-approach UT");
+            False(
+                NumericGuard.IsUsableUt(double.PositiveInfinity),
+                "infinite closest-approach UT");
 
             Equal(
                 "Separation: 1,000 km · Relative speed: 2,000 m/s",

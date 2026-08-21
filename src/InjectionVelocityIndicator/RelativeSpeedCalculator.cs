@@ -18,10 +18,10 @@ namespace InjectionVelocityIndicator
             // position, separation and displayed T-minus value.
             double closestApproachUt = trajectoryPatch.closestTgtApprUT;
 
-            if (!NumericGuard.IsUsableUt(
-                closestApproachUt,
-                trajectoryPatch.StartUT,
-                trajectoryPatch.EndUT))
+            // OrbitTargeter only requires a non-zero closest-approach UT and
+            // evaluates both orbit equations there even when the UT lies past
+            // a patch's formal bounds. Do not reject a value stock displays.
+            if (!NumericGuard.IsUsableUt(closestApproachUt))
             {
                 return false;
             }
