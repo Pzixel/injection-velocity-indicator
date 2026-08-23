@@ -1,4 +1,4 @@
-name: Release
+name: Release Maneuver Orbit Jumper
 
 on:
   workflow_dispatch:
@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-22.04
     env:
       KSP_ROOT: /tmp/ksp
-      RELEASE_STAGING: /tmp/release
+      RELEASE_STAGING: /tmp/release-maneuver-orbit-jumper
 
     steps:
       - name: Checkout repository
@@ -42,24 +42,24 @@ jobs:
             exit 1
           fi
           echo 'VERSION_STRING=${{ inputs.version }}' >> "$GITHUB_ENV"
-          echo 'RELEASE_TAG=v${{ inputs.version }}' >> "$GITHUB_ENV"
+          echo 'RELEASE_TAG=maneuver-orbit-jumper-v${{ inputs.version }}' >> "$GITHUB_ENV"
 
-      - name: Update version files and changelog
+      - name: Update Maneuver Orbit Jumper version and changelog
         id: version
         uses: KSPModdingLibs/KSPBuildTools/.github/actions/update-version@1.1.1
         with:
           version-string: ${{ inputs.version }}
           files: >-
-            GameData/InjectionVelocityIndicator/InjectionVelocityIndicator.version.versiontemplate
-            src/InjectionVelocityIndicator/Properties/AssemblyInfo.cs.versiontemplate
-          changelog-input-file: CHANGELOG.md
+            GameData/ManeuverOrbitJumper/ManeuverOrbitJumper.version.versiontemplate
+            src/ManeuverOrbitJumper/Properties/AssemblyInfo.cs.versiontemplate
+          changelog-input-file: CHANGELOG.ManeuverOrbitJumper.md
 
       - name: Commit release version
         shell: bash
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git commit -m "Release ${VERSION_STRING}"
+          git commit -m "Release Maneuver Orbit Jumper ${VERSION_STRING}"
 
       - name: Set up CKAN
         uses: KSPModdingLibs/KSPBuildTools/.github/actions/setup-ckan@1.1.1
@@ -69,52 +69,60 @@ jobs:
         with:
           dependency-identifiers: Harmony2
 
-      - name: Compile Injection Velocity Indicator Release
+      - name: Compile Maneuver Orbit Jumper Release
         uses: KSPModdingLibs/KSPBuildTools/.github/actions/compile@1.1.1
         with:
           build-configuration: Release
-          solution-file-path: src/InjectionVelocityIndicator/InjectionVelocityIndicator.csproj
+          solution-file-path: src/ManeuverOrbitJumper/ManeuverOrbitJumper.csproj
 
-      - name: Run unit tests
-        shell: bash
-        run: dotnet run --project tests/InjectionVelocityIndicator.Tests --configuration Release
-
-      - name: Assemble release ZIP
+      - name: Assemble Maneuver Orbit Jumper release ZIP
         id: package
         shell: bash
         run: |
           package_root="$RELEASE_STAGING/package"
-          release_zip="$GITHUB_WORKSPACE/InjectionVelocityIndicator-${VERSION_STRING}.zip"
-          mkdir -p "$package_root/GameData/InjectionVelocityIndicator/Plugins"
-          cp GameData/InjectionVelocityIndicator/Plugins/InjectionVelocityIndicator.dll \
-            "$package_root/GameData/InjectionVelocityIndicator/Plugins/"
-          cp GameData/InjectionVelocityIndicator/InjectionVelocityIndicator.version \
-            "$package_root/GameData/InjectionVelocityIndicator/"
-          cp LICENSE README.md CHANGELOG.md "$package_root/"
+          release_zip="$GITHUB_WORKSPACE/ManeuverOrbitJumper-${VERSION_STRING}.zip"
+          mkdir -p "$package_root/GameData/ManeuverOrbitJumper/Plugins"
+          cp GameData/ManeuverOrbitJumper/Plugins/ManeuverOrbitJumper.dll \
+            "$package_root/GameData/ManeuverOrbitJumper/Plugins/"
+          cp GameData/ManeuverOrbitJumper/ManeuverOrbitJumper.version \
+            "$package_root/GameData/ManeuverOrbitJumper/"
+          cp LICENSE "$package_root/"
+          cp README.ManeuverOrbitJumper.md "$package_root/README.md"
+          cp CHANGELOG.ManeuverOrbitJumper.md "$package_root/CHANGELOG.md"
           (
             cd "$package_root"
             zip -r "$release_zip" GameData LICENSE README.md CHANGELOG.md
           )
           echo "artifact-zip-path=$release_zip" >> "$GITHUB_OUTPUT"
 
-      - name: Verify release contents
+      - name: Verify Maneuver Orbit Jumper release contents
         shell: bash
         env:
           RELEASE_ZIP: ${{ steps.package.outputs.artifact-zip-path }}
         run: |
-          unzip -Z1 "$RELEASE_ZIP" > /tmp/release-files.txt
-          grep -Fx 'GameData/InjectionVelocityIndicator/Plugins/InjectionVelocityIndicator.dll' /tmp/release-files.txt
-          grep -Fx 'GameData/InjectionVelocityIndicator/InjectionVelocityIndicator.version' /tmp/release-files.txt
-          grep -Fx 'LICENSE' /tmp/release-files.txt
-          if grep -iE '(^|/)0Harmony\.dll$' /tmp/release-files.txt; then
+          unzip -Z1 "$RELEASE_ZIP" > /tmp/maneuver-orbit-jumper-release-files.txt
+          grep -Fx 'GameData/ManeuverOrbitJumper/Plugins/ManeuverOrbitJumper.dll' \
+            /tmp/maneuver-orbit-jumper-release-files.txt
+          grep -Fx 'GameData/ManeuverOrbitJumper/ManeuverOrbitJumper.version' \
+            /tmp/maneuver-orbit-jumper-release-files.txt
+          grep -Fx 'LICENSE' /tmp/maneuver-orbit-jumper-release-files.txt
+          grep -Fx 'README.md' /tmp/maneuver-orbit-jumper-release-files.txt
+          grep -Fx 'CHANGELOG.md' /tmp/maneuver-orbit-jumper-release-files.txt
+          if grep -iE '(^|/)0Harmony\.dll$' \
+            /tmp/maneuver-orbit-jumper-release-files.txt; then
             echo 'Release must not bundle Harmony.' >&2
+            exit 1
+          fi
+          if grep -q '^GameData/InjectionVelocityIndicator/' \
+            /tmp/maneuver-orbit-jumper-release-files.txt; then
+            echo 'Release must not bundle Injection Velocity Indicator.' >&2
             exit 1
           fi
 
       - name: Upload verified release artifact
         uses: actions/upload-artifact@v4
         with:
-          name: InjectionVelocityIndicator-${{ inputs.version }}
+          name: ManeuverOrbitJumper-${{ inputs.version }}
           path: ${{ steps.package.outputs.artifact-zip-path }}
           if-no-files-found: error
 
@@ -131,5 +139,5 @@ jobs:
         run: >-
           gh release create "$RELEASE_TAG" "$RELEASE_ZIP"
           --target master
-          --title "Injection Velocity Indicator ${VERSION_STRING}"
+          --title "Maneuver Orbit Jumper ${VERSION_STRING}"
           --notes-file "$RELEASE_NOTES"

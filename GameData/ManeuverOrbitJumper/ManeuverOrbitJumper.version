@@ -1,6 +1,6 @@
 {
-  "NAME": "Injection Velocity Indicator",
-  "URL": "https://raw.githubusercontent.com/Pzixel/injection-velocity-indicator/master/GameData/InjectionVelocityIndicator/InjectionVelocityIndicator.version",
+  "NAME": "Maneuver Orbit Jumper",
+  "URL": "https://raw.githubusercontent.com/Pzixel/injection-velocity-indicator/master/GameData/ManeuverOrbitJumper/ManeuverOrbitJumper.version",
   "DOWNLOAD": "https://github.com/Pzixel/injection-velocity-indicator/releases",
   "VERSION": {
     "MAJOR": 1,

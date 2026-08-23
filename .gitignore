@@ -3,4 +3,5 @@
 .vs/
 GameData/InjectionVelocityIndicator/Plugins/*.dll
 GameData/InjectionVelocityIndicator/Plugins/*.pdb
-
+GameData/ManeuverOrbitJumper/Plugins/*.dll
+GameData/ManeuverOrbitJumper/Plugins/*.pdb

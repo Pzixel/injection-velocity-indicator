@@ -18,7 +18,7 @@ jobs:
       dotnet-version: 10.x
       use-ckan: true
       dependency-identifiers: Harmony2
-      artifacts: GameData/InjectionVelocityIndicator/Plugins LICENSE README.md CHANGELOG.md CKAN
+      artifacts: GameData/InjectionVelocityIndicator/Plugins GameData/ManeuverOrbitJumper/Plugins LICENSE README.md README.ManeuverOrbitJumper.md CHANGELOG.md CHANGELOG.ManeuverOrbitJumper.md CKAN
 
   unit-tests:
     runs-on: ubuntu-24.04
@@ -32,6 +32,7 @@ jobs:
           dotnet-version: 10.x
 
       - name: Run unit tests
+        shell: bash
         run: dotnet run --project tests/InjectionVelocityIndicator.Tests --configuration Release
 
   metadata:
@@ -48,22 +49,40 @@ jobs:
           from pathlib import Path
           import yaml
 
-          metadata = yaml.safe_load(Path('CKAN/InjectionVelocityIndicator.netkan').read_text())
-          assert metadata['identifier'] == 'InjectionVelocityIndicator'
-          assert metadata['$kref'] == '#/ckan/github/Pzixel/injection-velocity-indicator'
-          assert metadata['$vref'] == '#/ckan/ksp-avc'
-          assert metadata['depends'] == [{'name': 'Harmony2'}]
+          expected_krefs = {
+              'InjectionVelocityIndicator': (
+                  '#/ckan/github/Pzixel/injection-velocity-indicator/'
+                  'version_from_asset/^InjectionVelocityIndicator-'
+                  '(?<version>[0-9]+\\.[0-9]+\\.[0-9]+)\\.zip$'
+              ),
+              'ManeuverOrbitJumper': (
+                  '#/ckan/github/Pzixel/injection-velocity-indicator/'
+                  'version_from_asset/^ManeuverOrbitJumper-'
+                  '(?<version>[0-9]+\\.[0-9]+\\.[0-9]+)\\.zip$'
+              ),
+          }
+
+          for identifier, expected_kref in expected_krefs.items():
+              path = Path('CKAN') / f'{identifier}.netkan'
+              metadata = yaml.safe_load(path.read_text())
+              assert metadata['identifier'] == identifier
+              assert metadata['$kref'] == expected_kref
+              assert metadata['$vref'] == '#/ckan/ksp-avc'
+              assert metadata['depends'] == [{'name': 'Harmony2'}]
           PY
 
       - name: Validate KSP-AVC template JSON
         shell: bash
         run: |
-          sed \
-            -e 's/@VERSION_MAJOR@/1/g' \
-            -e 's/@VERSION_MINOR@/0/g' \
-            -e 's/@VERSION_PATCH@/0/g' \
+          for template in \
             GameData/InjectionVelocityIndicator/InjectionVelocityIndicator.version.versiontemplate \
-            | python -m json.tool > /dev/null
+            GameData/ManeuverOrbitJumper/ManeuverOrbitJumper.version.versiontemplate; do
+            sed \
+              -e 's/@VERSION_MAJOR@/1/g' \
+              -e 's/@VERSION_MINOR@/0/g' \
+              -e 's/@VERSION_PATCH@/0/g' \
+              "$template" | python -m json.tool > /dev/null
+          done
 
       - name: Reject bundled Harmony
         shell: bash

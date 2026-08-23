@@ -2,7 +2,7 @@ identifier: InjectionVelocityIndicator
 name: Injection Velocity Indicator
 abstract: Adds target-relative speed to the stock celestial-body closest-approach tooltip.
 author: Pzixel
-$kref: '#/ckan/github/Pzixel/injection-velocity-indicator'
+$kref: '#/ckan/github/Pzixel/injection-velocity-indicator/version_from_asset/^InjectionVelocityIndicator-(?<version>[0-9]+\.[0-9]+\.[0-9]+)\.zip$'
 $vref: '#/ckan/ksp-avc'
 license: MIT
 tags:

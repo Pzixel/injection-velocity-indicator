@@ -1,0 +1,2 @@
+[assembly: KSPAssembly("ManeuverOrbitJumper", @VERSION_MAJOR@, @VERSION_MINOR@, @VERSION_PATCH@)]
+[assembly: KSPAssemblyDependency("HarmonyKSP", 1, 0, 0)]

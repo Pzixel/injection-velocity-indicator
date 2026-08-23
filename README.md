@@ -4,6 +4,11 @@
 
 A KSP 1.12.5 mod that adds the target-relative speed to the stock planet closest-approach tooltip.
 
+This repository also contains the separately packaged
+[Maneuver Orbit Jumper](https://github.com/Pzixel/injection-velocity-indicator/blob/master/README.ManeuverOrbitJumper.md).
+Each mod has its own assembly, GameData directory, CKAN identifier, and release
+ZIP; neither requires the other.
+
 ## TDLR
 
 Before:
@@ -31,11 +36,13 @@ The default Windows Steam location is detected automatically. For another KSP in
 dotnet build .\InjectionVelocityIndicator.sln -c Release -p:KSPRoot='D:\Games\Kerbal Space Program'
 ```
 
-The Release build prepares:
+The solution's Release build prepares both independent projects:
 
 ```text
 GameData/InjectionVelocityIndicator/
 └── Plugins/InjectionVelocityIndicator.dll
+GameData/ManeuverOrbitJumper/
+└── Plugins/ManeuverOrbitJumper.dll
 ```
 
 ## Install and remove
@@ -52,4 +59,4 @@ CI builds every push and pull request against stripped KSP 1.12.5 interfaces. Ha
 
 Maintainers publish a release from the GitHub Actions **Release** workflow by supplying a `MAJOR.MINOR.PATCH` version. The workflow updates the KSP-AVC version file and changelog, builds Release, verifies the ZIP contents, commits the release version, and publishes `InjectionVelocityIndicator-<version>.zip`.
 
-CKAN metadata is maintained in `CKAN/InjectionVelocityIndicator.netkan`. It uses GitHub releases as its source, reads KSP compatibility from the packaged `.version` file, installs only `GameData/InjectionVelocityIndicator`, and depends on `Harmony2`.
+CKAN metadata is maintained in `CKAN/InjectionVelocityIndicator.netkan`. It selects only `InjectionVelocityIndicator-<version>.zip` assets from the shared GitHub releases, reads KSP compatibility from the packaged `.version` file, installs only `GameData/InjectionVelocityIndicator`, and depends on `Harmony2`.
