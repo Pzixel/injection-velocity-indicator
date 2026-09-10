@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\..\src\SimpleSplitter\PlanSearchCache.cs" Link="PlanSearchCache.cs" />
+    <Compile Include="..\..\src\SimpleSplitter\StockTrajectorySafety.cs" Link="StockTrajectorySafety.cs" />
+    <Compile Include="..\..\src\SimpleSplitter\PanelPointerCapture.cs" Link="PanelPointerCapture.cs" />
+    <Compile Include="..\..\src\SimpleSplitter\StagedPropulsion.cs" Link="StagedPropulsion.cs" />
+    <Compile Include="..\..\src\SimpleSplitter\EvaluationBudget.cs" Link="EvaluationBudget.cs" />
+    <Compile Include="..\..\src\SimpleSplitter\BurnPhysics.cs" Link="BurnPhysics.cs" />
+    <Compile Include="..\..\src\SimpleSplitter\KickSchedule.cs" Link="KickSchedule.cs" />
+    <Compile Include="..\..\src\SimpleSplitter\SplitPlanner.cs" Link="SplitPlanner.cs" />
+    <Compile Include="..\..\src\SimpleSplitter\SplitModels.cs" Link="SplitModels.cs" />
+    <Compile Include="..\..\src\SimpleSplitter\FiniteBurnEstimate.cs" Link="FiniteBurnEstimate.cs" />
+    <Compile Include="..\..\src\SimpleSplitter\PropulsionReader.cs" Link="PropulsionReader.cs" />
+    <Compile Include="..\..\src\SimpleSplitter\CandidateRules.cs" Link="CandidateRules.cs" />
+    <Compile Include="..\..\src\SimpleSplitter\ResonanceMath.cs" Link="ResonanceMath.cs" />
+  </ItemGroup>
+</Project>

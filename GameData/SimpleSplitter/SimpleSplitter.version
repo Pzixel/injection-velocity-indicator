@@ -1,0 +1,20 @@
+{
+  "NAME": "Simple Splitter",
+  "URL": "https://raw.githubusercontent.com/Pzixel/injection-velocity-indicator/master/GameData/SimpleSplitter/SimpleSplitter.version",
+  "DOWNLOAD": "https://github.com/Pzixel/injection-velocity-indicator/releases",
+  "VERSION": {
+    "MAJOR": 1,
+    "MINOR": 2,
+    "PATCH": 0
+  },
+  "KSP_VERSION_MIN": {
+    "MAJOR": 1,
+    "MINOR": 12,
+    "PATCH": 5
+  },
+  "KSP_VERSION_MAX": {
+    "MAJOR": 1,
+    "MINOR": 12,
+    "PATCH": 5
+  }
+}

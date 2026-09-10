@@ -1,0 +1,10 @@
+identifier: SimpleSplitter
+name: Simple Splitter
+abstract: Splits a selected ejection maneuver into up to three balanced apsis burns.
+author: Pzixel
+$kref: '#/ckan/github/Pzixel/injection-velocity-indicator/version_from_asset/^SimpleSplitter-(?<version>[0-9]+\.[0-9]+\.[0-9]+)\.zip$'
+$vref: '#/ckan/ksp-avc'
+license: MIT
+tags:
+  - plugin
+  - convenience

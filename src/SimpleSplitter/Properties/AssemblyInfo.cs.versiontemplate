@@ -1,0 +1,4 @@
+[assembly: KSPAssembly("SimpleSplitter", @VERSION_MAJOR@, @VERSION_MINOR@, @VERSION_PATCH@)]
+[assembly: System.Reflection.AssemblyVersion("@VERSION_MAJOR@.@VERSION_MINOR@.@VERSION_PATCH@.0")]
+[assembly: System.Reflection.AssemblyFileVersion("@VERSION_MAJOR@.@VERSION_MINOR@.@VERSION_PATCH@.0")]
+[assembly: System.Reflection.AssemblyInformationalVersion("@VERSION_MAJOR@.@VERSION_MINOR@.@VERSION_PATCH@")]

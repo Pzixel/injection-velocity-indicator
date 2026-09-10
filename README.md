@@ -6,8 +6,11 @@ A KSP 1.12.5 mod that adds the target-relative speed to the stock planet closest
 
 This repository also contains the separately packaged
 [Maneuver Orbit Jumper](https://github.com/Pzixel/injection-velocity-indicator/blob/master/README.ManeuverOrbitJumper.md).
+It also contains [Simple Splitter](https://github.com/Pzixel/injection-velocity-indicator/blob/master/README.SimpleSplitter.md),
+which converts an ejection node into thrust-aware periapsis kicks, an optional
+plane change, and a timed departure burn.
 Each mod has its own assembly, GameData directory, CKAN identifier, and release
-ZIP; neither requires the other.
+ZIP; none requires either of the others.
 
 ## TDLR
 
@@ -43,6 +46,8 @@ GameData/InjectionVelocityIndicator/
 └── Plugins/InjectionVelocityIndicator.dll
 GameData/ManeuverOrbitJumper/
 └── Plugins/ManeuverOrbitJumper.dll
+GameData/SimpleSplitter/
+└── Plugins/SimpleSplitter.dll
 ```
 
 ## Install and remove

@@ -6,3 +6,5 @@ GameData/InjectionVelocityIndicator/Plugins/*.pdb
 GameData/ManeuverOrbitJumper/Plugins/*.dll
 GameData/ManeuverOrbitJumper/Plugins/*.pdb
 .diagnostics/
+GameData/SimpleSplitter/Plugins/*.dll
+GameData/SimpleSplitter/Plugins/*.pdb

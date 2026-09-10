@@ -9,6 +9,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "InjectionVelocityIndicator.
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ManeuverOrbitJumper", "src\ManeuverOrbitJumper\ManeuverOrbitJumper.csproj", "{4E600A58-D077-4A66-922B-02B88F9B94B6}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SimpleSplitter", "src\SimpleSplitter\SimpleSplitter.csproj", "{8FAAC4A4-4418-48E4-8B44-59F0462C6849}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SimpleSplitter.Tests", "tests\SimpleSplitter.Tests\SimpleSplitter.Tests.csproj", "{DA0C29D8-A252-44A1-99CC-BA6C54CB1444}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -27,5 +31,13 @@ Global
 		{4E600A58-D077-4A66-922B-02B88F9B94B6}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{4E600A58-D077-4A66-922B-02B88F9B94B6}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{4E600A58-D077-4A66-922B-02B88F9B94B6}.Release|Any CPU.Build.0 = Release|Any CPU
+		{8FAAC4A4-4418-48E4-8B44-59F0462C6849}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{8FAAC4A4-4418-48E4-8B44-59F0462C6849}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{8FAAC4A4-4418-48E4-8B44-59F0462C6849}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{8FAAC4A4-4418-48E4-8B44-59F0462C6849}.Release|Any CPU.Build.0 = Release|Any CPU
+		{DA0C29D8-A252-44A1-99CC-BA6C54CB1444}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{DA0C29D8-A252-44A1-99CC-BA6C54CB1444}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{DA0C29D8-A252-44A1-99CC-BA6C54CB1444}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{DA0C29D8-A252-44A1-99CC-BA6C54CB1444}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal
