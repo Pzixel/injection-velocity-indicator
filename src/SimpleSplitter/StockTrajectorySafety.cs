@@ -23,8 +23,8 @@ namespace SimpleSplitter
         {
             double minimum = orbit.referenceBody.Radius +
                 (orbit.referenceBody.atmosphere ? orbit.referenceBody.atmosphereDepth : 0);
-            orbit.GetOrbitalStateVectorsAtUT(start, out Vector3d r0, out _);
-            orbit.GetOrbitalStateVectorsAtUT(end, out Vector3d r1, out _);
+            orbit.GetFixedState(start, out Vector3d r0, out _);
+            orbit.GetFixedState(end, out Vector3d r1, out _);
             if (!CandidateRules.IsFinite(r0.magnitude) || !CandidateRules.IsFinite(r1.magnitude) ||
                 r0.magnitude <= minimum || r1.magnitude <= minimum) return false;
             if (orbit.PeR > minimum) return true;

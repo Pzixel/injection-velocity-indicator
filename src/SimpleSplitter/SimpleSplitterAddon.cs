@@ -1,7 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
-using System.Diagnostics;
+
 using UnityEngine;
 
 namespace SimpleSplitter
@@ -114,6 +114,7 @@ namespace SimpleSplitter
         private void OnDestroy()
         {
             StopAllCoroutines();
+            PropulsionReader.Clear();
             ShutdownToolbar();
         }
 
@@ -156,6 +157,9 @@ namespace SimpleSplitter
                 return;
             }
             ManeuverNode maneuverNode = patchedConicSolver.maneuverNodes[0];
+            // Loaded saves can retain an encounter solved against an older
+            // source orbit. Compare both alternatives against a fresh baseline.
+            patchedConicSolver.UpdateFlightPlan();
             if (!TryFindEncounter(maneuverNode.nextPatch, out CelestialBody? targetBody, out double arrivalUt) || targetBody == null)
             {
                 Post("The selected node must produce a target-body encounter.");
@@ -167,10 +171,11 @@ namespace SimpleSplitter
 
         private IEnumerator PrepareSplit(Vessel vessel, ManeuverNode node, CelestialBody targetBody, double arrivalUt, int maximumBurns)
         {
+            var elapsed = System.Diagnostics.Stopwatch.StartNew();
             double originalUt = node.UT;
             Vector3d originalDeltaV = node.DeltaV;
             yield return null;
-            yield return WaitForStockPropulsion(vessel);
+            yield return PropulsionReader.Refresh(vessel);
             if (FlightGlobals.ActiveVessel != vessel || vessel.patchedConicSolver == null || vessel.patchedConicSolver.maneuverNodes.Count != 1 || vessel.patchedConicSolver.maneuverNodes[0] != node || Math.Abs(node.UT - originalUt) > 0.01 || (node.DeltaV - originalDeltaV).magnitude > 0.001)
             {
                 planningCoroutine = null;
@@ -189,7 +194,7 @@ namespace SimpleSplitter
             choiceErrors.Clear();
             choiceRequest = request;
             choiceVesselId = vessel.id;
-            UnityEngine.Debug.Log("[SimpleSplitter] Comparing through " + maximumBurns + " burns; cosine loss is diagnostic only.");
+            UnityEngine.Debug.Log("[SimpleSplitter] Comparing through " + maximumBurns + " burns; propulsion from embedded KER; cosine loss is diagnostic only.");
             foreach (BurnStage stage in stagedPropulsion.Stages)
             {
                 UnityEngine.Debug.Log(string.Format("{0}Stage {1}: remaining={2:R} m/s, mass={3:R} t, thrust={4:R} kN, exhaust={5:R} m/s.", "[SimpleSplitter] ", stage.Stage, stage.DeltaV, stage.Engine.Mass, stage.Engine.Thrust, stage.Engine.ExhaustVelocity));
@@ -197,25 +202,19 @@ namespace SimpleSplitter
             UnityEngine.Debug.Log(string.Format("{0}Original node: UT={1:R}, deltaV=({2:R}, {3:R}, {4:R}), magnitude={5:R} m/s, target={6}, SOI-entry UT={7:R}.", "[SimpleSplitter] ", node.UT, node.DeltaV.x, node.DeltaV.y, node.DeltaV.z, node.DeltaV.magnitude, targetBody.bodyName, arrivalUt));
             Post("Calculating thrust-aware periapsis kicks...");
             yield return RunPlanner(vessel, request);
-        }
-
-        private static IEnumerator WaitForStockPropulsion(Vessel vessel)
-        {
-            Stopwatch elapsed = Stopwatch.StartNew();
-            while (FlightGlobals.ActiveVessel == vessel && !PropulsionReader.IsReady(vessel) && elapsed.Elapsed.TotalSeconds < 3.0)
-            {
-                yield return null;
-            }
+            UnityEngine.Debug.Log(string.Format("[SimpleSplitter] Comparison finished: max={0}, safe={1}, elapsed={2:F3} s.",
+                maximumBurns, choices.Count, elapsed.Elapsed.TotalSeconds));
         }
 
         private IEnumerator RunPlanner(Vessel vessel, SplitRequest request)
         {
             yield return null;
             PlanResult? result = null;
-            IEnumerator planner = SplitPlanner.PlanAsync(request, delegate(PlanResult value)
+            var phase = System.Diagnostics.Stopwatch.StartNew();
+            IEnumerator planner = PlanningWork.Run(SplitPlanner.PlanAsync(request, delegate(PlanResult value)
             {
                 result = value;
-            });
+            }));
             while (true)
             {
                 bool flag;
@@ -242,39 +241,51 @@ namespace SimpleSplitter
                 Post("The split calculation did not complete.");
                 yield break;
             }
-            if (result.Candidate == null)
+            request.Progress = "Checking staged fuel estimate...";
+            UnityEngine.Debug.Log(string.Format("[SimpleSplitter] Numerical search: {0:F3} s.", phase.Elapsed.TotalSeconds));
+            yield return PropulsionReader.Refresh(vessel);
+            StagedPropulsion refreshed = PropulsionReader.Read(vessel, out string error);
+            if (!refreshed.IsUsable)
             {
                 planningCoroutine = null;
-                request.Progress = result.Error;
-                Post(result.Error);
+                request.Progress = error;
+                Post(error);
                 yield break;
             }
-            request.Progress = "Checking staged fuel estimate...";
-            yield return WaitForStockPropulsion(vessel);
-            if (FlightGlobals.ActiveVessel != vessel || !PlanSearchCache.MatchesPropulsion(request.Propulsion, PropulsionReader.Read(vessel, out string error)) || vessel.patchedConicSolver == null || vessel.patchedConicSolver.maneuverNodes.Count != 1 || Math.Abs(request.Node.UT - request.OriginalUt) > 0.01 || (request.Node.DeltaV - request.OriginalDeltaV).magnitude > 0.001)
+            if (FlightGlobals.ActiveVessel != vessel || !PlanSearchCache.MatchesPropulsion(request.Propulsion, refreshed) || vessel.patchedConicSolver == null || vessel.patchedConicSolver.maneuverNodes.Count != 1 || Math.Abs(request.Node.UT - request.OriginalUt) > 0.01 || (request.Node.DeltaV - request.OriginalDeltaV).magnitude > 0.001)
             {
                 planningCoroutine = null;
                 Post("The vessel or maneuver changed while calculating; nothing was changed.");
                 yield break;
             }
-            foreach (SplitCandidate candidate in result.Candidates)
+            phase.Restart();
+            yield return PlanningWork.Run(SafePlanSearch.FindAsync(request,
+                (candidate, completed) => ValidatePreview(vessel, request, candidate, completed),
+                () => SourceNodeMatches(vessel, request), (count, candidate) => choices[count] = candidate));
+            UnityEngine.Debug.Log(string.Format("[SimpleSplitter] Safety and redistribution: {0:F3} s.", phase.Elapsed.TotalSeconds));
+            // Read only promises the snapshot captured by Refresh. A live
+            // search spans seconds, during which background resource systems
+            // can change it. Recompute KER here, as ApplyChoice already does,
+            // then compare the actual remaining staged propulsion.
+            yield return PropulsionReader.Refresh(vessel);
+            refreshed = PropulsionReader.Read(vessel, out error);
+            if (!refreshed.IsUsable || !PlanSearchCache.MatchesPropulsion(request.Propulsion, refreshed))
             {
-                int count = candidate.Nodes.Count;
-                if (choices.ContainsKey(count)) continue;
-                if (!SourceNodeMatches(vessel, request)) break;
-                bool safe;
-                if (!searchCache.StockSafety.TryGetValue(candidate, out safe))
-                {
-                    bool checkedSafe = false;
-                    yield return ValidatePreview(vessel, request, candidate, value => checkedSafe = value);
-                    safe = checkedSafe;
-                    if (SourceNodeMatches(vessel, request)) searchCache.StockSafety[candidate] = safe;
-                }
-                if (safe) choices[count] = candidate;
-                yield return null;
+                choices.Clear();
+                planningCoroutine = null;
+                request.Progress = "Fuel, engines or staging changed. Compare again.";
+                Post(request.Progress);
+                yield break;
+            }
+            if (!SourceNodeMatches(vessel, request))
+            {
+                planningCoroutine = null;
+                Post("The source orbit or maneuver changed during comparison. Compare again.");
+                yield break;
             }
             planningCoroutine = null;
             request.Progress = choices.Count + " safe options. Choose a row to apply. Reused " + searchCache.ReusedCounts + " burn counts.";
+            if (searchCache.RefinementBudgetReached) request.Progress += " Refinement paused; Compare continues it.";
             Post(choices.Count == 0 ? "No checked option retained a safe stock encounter; the original node is restored."
                 : request.Progress);
         }
@@ -295,10 +306,14 @@ namespace SimpleSplitter
             }
             try
             {
+                patchedConicSolver.UpdateFlightPlan();
+                if (!TryFindEncounter(patchedConicSolver.maneuverNodes[0].nextPatch,
+                    out CelestialBody? liveTarget, out double referenceArrival) || liveTarget != request.TargetBody)
+                    return false;
                 RemoveAllNodes(patchedConicSolver);
                 AddNodes(patchedConicSolver, list);
                 patchedConicSolver.UpdateFlightPlan();
-                if (!ValidateCommittedPlan(patchedConicSolver, referenceBody, request.TargetBody, request.OriginalUt, request.ArrivalUt, list.Count, out double actualArrivalUt, out string error))
+                if (!ValidateCommittedPlan(patchedConicSolver, referenceBody, request.TargetBody, request.OriginalUt, referenceArrival, list.Count, out double actualArrivalUt, out string error))
                 {
                     RestoreSingleNode(patchedConicSolver, original);
                     UnityEngine.Debug.Log("[SimpleSplitter] Candidate rejected: " + error);
@@ -307,9 +322,9 @@ namespace SimpleSplitter
                 undoSnapshot = new UndoSnapshot(vessel.id, original, list);
                 displayedPlan = candidate;
                 planScroll = Vector2.zero;
-                double num = actualArrivalUt - request.ArrivalUt;
-                double num2 = 0.01 * (request.ArrivalUt - request.OriginalUt);
-                UnityEngine.Debug.Log(string.Format("{0}Accepted encounter: target={1}, original SOI-entry UT={2:R}, new SOI-entry UT={3:R}, difference={4:R} s, tolerance={5:R} s.", "[SimpleSplitter] ", request.TargetBody.bodyName, request.ArrivalUt, actualArrivalUt, num, num2));
+                double num = actualArrivalUt - referenceArrival;
+                double num2 = CandidateRules.ArrivalToleranceSeconds;
+                UnityEngine.Debug.Log(string.Format("{0}Accepted encounter: target={1}, original SOI-entry UT={2:R}, new SOI-entry UT={3:R}, difference={4:R} s, tolerance={5:R} s.", "[SimpleSplitter] ", request.TargetBody.bodyName, referenceArrival, actualArrivalUt, num, num2));
                 for (int i = 0; i < list.Count; i++)
                 {
                     NodeSpec nodeSpec = list[i];
@@ -393,7 +408,8 @@ namespace SimpleSplitter
             }
             if (!CandidateRules.ArrivalIsWithinTolerance(originalNodeUt, originalArrivalUt, actualArrivalUt))
             {
-                error = "the resulting encounter is outside the 1% arrival window.";
+                error = "the resulting encounter is more than one day from the original arrival (" +
+                    (actualArrivalUt - originalArrivalUt).ToString("+0;-0;0") + " s).";
                 return false;
             }
             return true;

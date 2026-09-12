@@ -30,7 +30,8 @@ namespace SimpleSplitter
             List<NodeSpec> nodes,
             CandidateScore score,
             int leadOrbits, double setupDeltaV, double maximumSetupLoss,
-            FiniteBurnEstimate departureEstimate, FiniteBurnEstimate executionEstimate, double excessVelocityError, double originalDeltaV)
+            FiniteBurnEstimate departureEstimate, FiniteBurnEstimate executionEstimate, double excessVelocityError, double originalDeltaV,
+            KickSchedule? schedule = null)
         {
             Nodes = nodes;
             Score = score;
@@ -41,9 +42,12 @@ namespace SimpleSplitter
             ExecutionEstimate = executionEstimate;
             ExcessVelocityError = excessVelocityError;
             OriginalDeltaV = originalDeltaV;
+            Schedule = schedule;
         }
 
         internal List<NodeSpec> Nodes { get; }
+        internal KickSchedule? Schedule { get; }
+        internal SplitCandidate? LiveCandidate { get; set; }
         internal CandidateScore Score { get; }
         internal int LeadOrbits { get; }
         internal double SetupDeltaV { get; }
@@ -54,6 +58,9 @@ namespace SimpleSplitter
         internal double MaximumCosineLoss => Math.Max(MaximumSetupLoss, ExecutionEstimate.CosineLoss);
         internal double AdditionalDeltaV => Score.TotalDeltaV - OriginalDeltaV;
         internal double OriginalDeltaV { get; }
+        // Populated by the finite-path encounter check, never inferred from
+        // burnout position error or the stock instantaneous maneuver chain.
+        internal double TimedArrivalOffsetSeconds { get; set; } = double.NaN;
     }
 
     internal sealed class SplitRequest
@@ -77,7 +84,7 @@ namespace SimpleSplitter
             Propulsion = propulsion;
             Cache = cache ?? new PlanSearchCache();
             MaximumBurns = maximumBurns;
-            node.patch.GetOrbitalStateVectorsAtUT(node.UT, out Vector3d r, out Vector3d v);
+            node.patch.GetFixedState(node.UT, out Vector3d r, out Vector3d v);
             SourceOrbit = SplitPlanner.OrbitFromState(r, v, node.patch.referenceBody, node.UT);
         }
 

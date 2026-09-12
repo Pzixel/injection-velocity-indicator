@@ -39,7 +39,7 @@ namespace SimpleSplitter
             // GUI.Window keeps these dimensions. Automatic GUILayout resizing
             // previously fought the height reset during scroll/layout/repaint.
             panelRect.width = Math.Min(panelCollapsed ? 220f : choiceRequest != null && displayedPlan == null ? 760f : 500f, Screen.width);
-            panelRect.height = Math.Min(panelCollapsed ? 28f : displayedPlan != null ? 450f : choiceRequest != null ? 230f + (maximumBurns - 1) * 30f : 180f, Screen.height);
+            panelRect.height = Math.Min(panelCollapsed ? 28f : displayedPlan != null ? 450f : choiceRequest != null ? 252f + (maximumBurns - 1) * 30f : 180f, Screen.height);
             if (!panelPositioned)
             {
                 panelRect.x = (Screen.width - panelRect.width) * 0.5f;
@@ -113,7 +113,7 @@ namespace SimpleSplitter
                     : nodeCount == 0 ? "Create one departure maneuver with an encounter to split it."
                     : nodeCount != 1 ? "Splitting requires exactly one maneuver node."
                     : "One departure node with an encounter. Stages are used automatically.";
-                if (!string.IsNullOrEmpty(GUI.tooltip)) status = GUI.tooltip;
+                if (choiceRequest == null && !string.IsNullOrEmpty(GUI.tooltip)) status = GUI.tooltip;
                 GUI.Label(new Rect(12, 104, width, 44), status, wrappedLabel);
                 if (choiceRequest != null) DrawChoices(width);
             }

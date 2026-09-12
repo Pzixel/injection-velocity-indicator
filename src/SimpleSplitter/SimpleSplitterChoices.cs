@@ -14,14 +14,43 @@ namespace SimpleSplitter
                 NodesMatch(vessel.patchedConicSolver.maneuverNodes,
                     new[] { new NodeSpec(request.OriginalUt, request.OriginalDeltaV) }))) return false;
             Orbit current = vessel.patchedConicSolver.maneuverNodes[0].patch;
-            if (current == null || current.referenceBody != request.SourceOrbit.referenceBody) return false;
-            current.GetOrbitalStateVectorsAtUT(request.OriginalUt, out Vector3d r, out Vector3d v);
-            request.SourceOrbit.GetOrbitalStateVectorsAtUT(request.OriginalUt, out Vector3d expectedR, out Vector3d expectedV);
-            return (r - expectedR).magnitude < 1e-3 && (v - expectedV).magnitude < 1e-6;
+            // Guard user intent, not a frozen state vector. Coasting drift is
+            // not a node edit. Cache identity still compares orbital inputs;
+            // acceptance rebuilds and checks the live trajectory.
+            return current != null && current.referenceBody == request.SourceOrbit.referenceBody;
         }
 
         private IEnumerator ValidatePreview(Vessel vessel, SplitRequest request, SplitCandidate candidate, Action<bool> completed)
         {
+            if (!SourceNodeMatches(vessel, request)) { completed(false); yield break; }
+            vessel.patchedConicSolver.UpdateFlightPlan();
+            ManeuverNode original = vessel.patchedConicSolver.maneuverNodes[0];
+            if (!TryFindEncounter(original.nextPatch, out CelestialBody? target, out double arrival) || target != request.TargetBody)
+            { completed(false); yield break; }
+            // Compare with what the unchanged original node predicts NOW.
+            // Both alternatives must use the same live orbital reference.
+            SplitRequest searchRequest = request;
+            Action<bool> report = completed;
+            completed = value => { activeRequest = searchRequest; report(value); };
+            request = new SplitRequest(original, request.TargetBody, arrival,
+                Planetarium.GetUniversalTime(), request.Propulsion, request.MaximumBurns, request.Cache);
+            activeRequest = request;
+            request.Progress = "Refreshing " + candidate.Nodes.Count + " burns against the live orbit...";
+            SplitCandidate? refreshed = null;
+            yield return SplitPlanner.RefreshAsync(request, candidate, value => refreshed = value);
+            if (refreshed == null) { completed(false); yield break; }
+            candidate.LiveCandidate = refreshed;
+            candidate = refreshed;
+            // Recheck timed safety against the live orbit. Roundoff accepted by
+            // input identity must never exempt the real path from safety checks.
+            Orbit current = vessel.patchedConicSolver.maneuverNodes[0].patch;
+            current.GetFixedState(request.Now, out Vector3d r, out Vector3d v);
+            Orbit liveSource = SplitPlanner.OrbitFromState(r, v, current.referenceBody, request.Now);
+            // Reject a failed timed execution before constructing stock nodes.
+            // The stock prefix checks are still required for every accepted row.
+            bool finiteSafe = false;
+            yield return ValidateFinitePath(vessel, request, candidate, liveSource, value => finiteSafe = value);
+            if (!finiteSafe) { completed(false); yield break; }
             // Every synchronous prefix check restores the original in finally.
             // Cancellation, scene switches, and user edits at any yield therefore
             // never leave a partially constructed preview in the flight plan.
@@ -40,9 +69,7 @@ namespace SimpleSplitter
                 }
                 yield return null;
             }
-            bool finiteSafe = false;
-            yield return ValidateFinitePath(vessel, request, candidate, value => finiteSafe = value);
-            completed(finiteSafe);
+            completed(true);
         }
 
         private static bool CheckPrefix(PatchedConicSolver solver, SplitRequest request, SplitCandidate candidate,
@@ -97,26 +124,28 @@ namespace SimpleSplitter
         private IEnumerator ApplyChoice(Vessel vessel, SplitRequest request, SplitCandidate candidate)
         {
             yield return null;
-            yield return WaitForStockPropulsion(vessel);
+            yield return PropulsionReader.Refresh(vessel);
+            StagedPropulsion refreshed = PropulsionReader.Read(vessel, out string propulsionError);
             if (!SourceNodeMatches(vessel, request) || candidate.Nodes.Count > maximumBurns ||
-                !PlanSearchCache.MatchesPropulsion(request.Propulsion, PropulsionReader.Read(vessel, out _)))
+                !PlanSearchCache.MatchesPropulsion(request.Propulsion, refreshed))
             {
                 planningCoroutine = null;
-                Post("The vessel, fuel or maneuver changed. Compare plans again.");
+                Post(refreshed.IsUsable ? "The vessel, fuel or maneuver changed. Compare plans again." : propulsionError);
                 yield break;
             }
             activeRequest = request;
             bool safe = false;
             yield return ValidatePreview(vessel, request, candidate, value => safe = value);
-            yield return WaitForStockPropulsion(vessel);
+            yield return PropulsionReader.Refresh(vessel);
+            refreshed = PropulsionReader.Read(vessel, out propulsionError);
             if (safe && SourceNodeMatches(vessel, request) &&
-                PlanSearchCache.MatchesPropulsion(request.Propulsion, PropulsionReader.Read(vessel, out _)))
-                ApplyCandidate(vessel, request, candidate);
+                PlanSearchCache.MatchesPropulsion(request.Propulsion, refreshed))
+                ApplyCandidate(vessel, request, candidate.LiveCandidate ?? candidate);
             else
             {
                 choices.Remove(candidate.Nodes.Count);
                 searchCache.StockSafety.Remove(candidate);
-                Post("The option is no longer safe or the vessel changed. Compare plans again.");
+                Post(refreshed.IsUsable ? "The option is no longer safe or the vessel changed. Compare plans again." : propulsionError);
             }
             planningCoroutine = null;
         }

@@ -18,7 +18,7 @@ jobs:
       dotnet-version: 10.x
       use-ckan: true
       dependency-identifiers: Harmony2
-      artifacts: GameData/InjectionVelocityIndicator/Plugins GameData/ManeuverOrbitJumper/Plugins GameData/SimpleSplitter/Plugins LICENSE README.md README.ManeuverOrbitJumper.md README.SimpleSplitter.md CHANGELOG.md CHANGELOG.ManeuverOrbitJumper.md CHANGELOG.SimpleSplitter.md CKAN
+      artifacts: GameData/InjectionVelocityIndicator/Plugins GameData/ManeuverOrbitJumper/Plugins GameData/SimpleSplitter LICENSE LICENSE.SimpleSplitter src/SimpleSplitter README.md README.ManeuverOrbitJumper.md README.SimpleSplitter.md CHANGELOG.md CHANGELOG.ManeuverOrbitJumper.md CHANGELOG.SimpleSplitter.md CKAN
 
   unit-tests:
     runs-on: ubuntu-24.04
@@ -76,6 +76,8 @@ jobs:
               assert metadata['$kref'] == expected_kref
               assert metadata['$vref'] == '#/ckan/ksp-avc'
               assert metadata.get('depends', []) == expected_depends
+              if identifier == 'SimpleSplitter':
+                  assert metadata['license'] == 'GPL-3.0'
           PY
 
       - name: Validate KSP-AVC template JSON

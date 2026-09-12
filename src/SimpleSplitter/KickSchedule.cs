@@ -12,6 +12,7 @@ namespace SimpleSplitter
         internal double SetupDeltaV, Elapsed;
         internal int LeadOrbits;
         internal int[] StageKickCounts = new int[0];
+        internal double SearchCeiling, DistributionBias;
 
         internal static KickSchedule? Find(int count, double mu, double radius,
             double speed, double tangentialFraction, double minimumRadius,
@@ -23,17 +24,17 @@ namespace SimpleSplitter
         internal static KickSchedule? Find(int count, double mu, double radius,
             double speed, double tangentialFraction, double minimumRadius,
             double maximumRadius, double originalPeriod, int availableOrbits,
-            double maximumDeltaV, StagedPropulsion propulsion, double loss, int[]? fixedLayout = null)
+            double maximumDeltaV, StagedPropulsion propulsion, double loss, int[]? fixedLayout = null, double distributionBias = 0)
         {
             List<KickSchedule> schedules = FindAll(count, mu, radius, speed, tangentialFraction,
-                minimumRadius, maximumRadius, originalPeriod, availableOrbits, maximumDeltaV, propulsion, loss, fixedLayout);
+                minimumRadius, maximumRadius, originalPeriod, availableOrbits, maximumDeltaV, propulsion, loss, fixedLayout, distributionBias);
             return schedules.Count == 0 ? null : schedules[0];
         }
 
         internal static List<KickSchedule> FindAll(int count, double mu, double radius,
             double speed, double tangentialFraction, double minimumRadius,
             double maximumRadius, double originalPeriod, int availableOrbits,
-            double maximumDeltaV, StagedPropulsion propulsion, double loss, int[]? fixedLayout = null)
+            double maximumDeltaV, StagedPropulsion propulsion, double loss, int[]? fixedLayout = null, double distributionBias = 0)
         {
             var schedules = new List<KickSchedule>();
             if (count < 1 || count > MaximumKicks || availableOrbits <= count ||
@@ -84,16 +85,17 @@ namespace SimpleSplitter
             bool SegmentFits(BurnStage stage, double priorDeltaV, double total, int slots)
             {
                 if (double.IsPositiveInfinity(loss)) return true;
-                double kick = total / slots;
+                double spent = 0;
                 for (int i = 0; i < slots; i++)
                 {
-                    double spent = i * kick;
+                    double kick = total * Share(i, slots, distributionBias);
                     // Orbital speed includes all preceding stages; mass loss
                     // belongs only to the propulsion segment being evaluated.
                     BurnPhysics engine = new BurnPhysics(stage.Engine.MassAfter(spent),
                         stage.Engine.Thrust, stage.Engine.ExhaustVelocity);
                     if (!engine.KickFits(mu, radius, speed + priorDeltaV + spent,
                         tangentialFraction, 0, kick, loss)) return false;
+                    spent += kick;
                 }
                 return true;
             }
@@ -105,7 +107,8 @@ namespace SimpleSplitter
                 KickSchedule? Build(double total)
                 {
                     if (total <= floor || total > ceilingForLayout + 1e-7) return null;
-                    KickSchedule trial = new KickSchedule { SetupDeltaV = total, StageKickCounts = fixedCounts };
+                    KickSchedule trial = new KickSchedule { SetupDeltaV = total, StageKickCounts = fixedCounts,
+                        SearchCeiling = maximumDeltaV, DistributionBias = distributionBias };
                     double spent = 0;
                     for (int segment = 0; segment < fixedCounts.Length; segment++)
                     {
@@ -113,9 +116,9 @@ namespace SimpleSplitter
                         double segmentTotal = segment + 1 == fixedCounts.Length ? total - spent : stage.DeltaV;
                         if (segmentTotal <= 1e-7 || segmentTotal > stage.DeltaV + 1e-6 ||
                             !SegmentFits(stage, spent, segmentTotal, fixedCounts[segment])) return null;
-                        double kick = segmentTotal / fixedCounts[segment];
                         for (int i = 0; i < fixedCounts[segment]; i++)
                         {
+                            double kick = segmentTotal * Share(i, fixedCounts[segment], distributionBias);
                             if (!OrbitScalars.TryCreate(mu, radius, speed + spent + kick, tangentialFraction, out OrbitScalars orbit) ||
                                 orbit.Periapsis <= minimumRadius || orbit.Apoapsis >= maximumRadius) return null;
                             trial.DeltaVs.Add(kick);
@@ -170,6 +173,15 @@ namespace SimpleSplitter
                 }
                 return null;
             }
+        }
+        // Positive bias transfers delta-v into later kicks in each propulsion
+        // segment. The segment total and staging boundary remain unchanged.
+        private static double Share(int index, int count, double bias)
+        {
+            if (count <= 1 || bias == 0) return 1.0 / count;
+            double sum = 0;
+            for (int i = 0; i < count; i++) sum += Math.Exp(bias * (2.0 * i / (count - 1) - 1));
+            return Math.Exp(bias * (2.0 * index / (count - 1) - 1)) / sum;
         }
     }
 }

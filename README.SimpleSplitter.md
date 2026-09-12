@@ -21,13 +21,25 @@ for low-thrust and heavily loaded vessels.
 
 The table includes every count from 2 through the chosen maximum. A count for
 which no safe plan was found remains visible as an unavailable row; it does
-not stop searches at higher counts. Available rows show total timed Δv,
-additional Δv relative to the original impulse, largest timed burn, departure
-error, burnout position error in km, and maximum cosine loss over all burns.
-Negative additional Δv means a saving. Cosine loss is a diagnostic, never a
-filter. Departure error is outgoing excess-velocity vector error in m/s (local
-burnout velocity error for bound departures). Within a count, lower departure
-error ranks first, followed by lower total Δv.
+not stop searches at higher counts. Available rows show:
+
+- **Total Δv:** consumption across the timed burns, in m/s, compared with the
+  original maneuver displayed above the table.
+- **Added Δv:** extra m/s and percentage of the original maneuver's Δv.
+  Negative values mean savings. This is a cost comparison, not encounter error.
+- **Longest burn:** the longest continuous full-throttle firing. Hover for
+  total engine-on time and the geometric burn-spread diagnostic.
+- **Arrival shift:** simulated arrival early/late at the target's sphere of
+  influence, compared with the live original maneuver. All offered plans pass
+  the arrival window and safety checks; Apply repeats validation.
+
+The former "Cosine" column measured the maximum `1 − cos(angle)` between a
+burn's nominal node position and the vessel's position during execution. It
+is a peak geometric diagnostic, not an integrated Δv loss or encounter error.
+It remains available in the longest-burn tooltip, explicitly labeled, and is
+never a filter. Burnout position and outgoing velocity mismatch remain solver
+diagnostics in the logs rather than table columns. Within a count, lower
+outgoing velocity mismatch ranks first, followed by lower total Δv.
 
 The toolbox starts closed and opens only when requested through its toolbar
 button. Selecting or deselecting a maneuver does not change whether it is open.
@@ -59,14 +71,30 @@ radial velocity are supported; the plane intersection need not be exactly Ap.
 Five burns remains a practical default. The maximum limits the table size,
 including setup kicks, a plane change when useful, and final departure.
 
-Burn duration uses KSP's remaining staged vacuum delta-v, mass, thrust, and Isp.
+Burn duration uses an embedded copy of Kerbal Engineer Redux's fuel-flow and
+staging simulator. **KER does not need to be installed, and stock stage delta-v
+is never used.** The simulator snapshots the vessel, then calculates remaining
+vacuum propulsion at full throttle and the configured engine limiters in the
+background. Active engines execute first, followed by the remaining stages.
+Individual resource-drain intervals preserve changes of engine and Isp within
+a stage. Contiguous intervals with the same effective engine are merged, so
+draining another tank does not require another maneuver.
 Each burn stays within one propulsion segment. For each total count, the planner
 searches stage allocations and samples setup-energy ceilings. It solves the
 resonant timing for each layout and fully simulates up to three layouts per
-sample. It retains three distinct finalists per count so stock validation can
-try an alternative if the lowest-error candidate is unsafe. This bounded search
+sample. It initially retains three distinct finalists per count. If a preferred
+path is unsafe, it retries with different setup energies and redistributes
+delta-v within each stage, solving resonance timing again. The retry retains
+all its simulated alternatives for safety checks. This bounded search
 reports the best safe plan found; it does not prove global optimality or that
 an unsuccessful count is physically impossible.
+
+Initial options for all counts are checked before redistribution retries.
+Refinement shares a two-second allowance, checked between batches, so a
+difficult low-count row cannot hold up the whole table. When the status says
+refinement paused, **Compare plans** resumes unfinished batches while the
+inputs still match. Every exposed row has completed both timed execution and
+stock trajectory checks; exhausting the allowance never bypasses safety.
 
 Shares are balanced within a propulsion segment. A new count is optimized
 independently: three same-stage kicks may all be redistributed, rather than
@@ -77,9 +105,18 @@ energy/period while carrying earlier execution errors into later burns.
 
 Completed searches are cached separately for each count. Raising the maximum
 from 7 to 8 reuses counts 2–7 and searches 8; lowering it only filters results.
-The key includes source orbit, node vector/time, target/arrival, stage order,
+The key includes source orbit, node vector/time, target, stage order,
 remaining fuel, mass, thrust and exhaust velocity. Changed inputs invalidate
 the cache, and counts whose first burns are now too close are recomputed.
+Float-scale orbital noise is compared near the original capture time instead
+of being amplified by months of extrapolation. Safety is rechecked against the
+live orbit when applying an option; derived encounter-time noise is not an edit.
+Each new comparison refreshes stock safety results against its current baseline
+while retaining the numerical searches, including completed redistribution.
+For each selected alternative, its cached stage layout, redistribution and
+setup ceiling are reused to refresh resonance timing and burn timers against
+the live orbit. This avoids applying stale timings without repeating the whole
+search across counts and distributions.
 Cancellation retains completed counts for the next comparison in this flight.
 
 Planning yields between batches of integrations, using a 4 ms time budget and
@@ -101,11 +138,13 @@ can be more accurate than assuming a strict 50/50 split around the node.
 Safety is checked again before applying a chosen row. Numerical sampling and
 stock solver precision still limit these predictions.
 
-The largest timed burn must be smaller than the original impulse. Estimated
-expenditure, **including finite-burn compensation**, cannot exceed 105% of the
-original delta-v. The nominal stock flight plan must encounter the same body
-within 1% of the original trip duration. The nominal departure state and UT
-are preserved; KSP's encounter check is repeated after constructing the nodes.
+Extra delta-v and the largest burn are comparison properties, with no hidden
+percentage cap. Each burn must still fit the fuel available in its propulsion
+segment. Both the nominal stock flight plan and the simulated timed departure
+must encounter the same body within one day of the original arrival, using
+KSP's displayed calendar. A timed path that never reaches the target is rejected.
+The nominal departure state and UT are preserved during construction;
+KSP's encounter check is repeated after constructing the nodes.
 Rejected stock encounters are rolled back before trying the next candidate.
 
 ## Executing the timed burns
@@ -120,7 +159,7 @@ holds a fixed inertial maneuver direction throughout each burn.
 The timers are numerically adjusted to recover the intended orbital energy
 and period. This matters particularly near escape, where a small energy error
 can cause a large return-time error. The departure window is also searched to
-reduce outgoing excess-velocity error within the expenditure limit; its time
+reduce outgoing excess-velocity error within the available stage fuel; its time
 offset can differ substantially from half the burn duration.
 
 The model propagates the full sequence of finite burns and intervening coasts.
@@ -132,13 +171,16 @@ the remaining flight plan after executing each kick.
 
 Estimates assume constant full vacuum thrust at the configured limiter and
 constant Isp within each propulsion segment. Follow the displayed stage order;
-stage transitions happen between burns. The model uses KSP's post-decoupling
+stage transitions happen between burns. The model uses KER's post-decoupling
 masses and fuel budgets. A burn that would need another propulsion segment is
 rejected unless the setup can be redistributed within the node limit. The mod
-waits briefly for KSP's staged estimate to finish; unavailable estimates and
+waits for its embedded simulator to finish; failed calculations and
 unsupported air-dependent, throttle-locked, or thrust-curve propulsion produce
 an explanation instead of an engine-selection prompt. Changes to staging,
 resources, or engine settings during calculation invalidate the result.
+The KER simulator's limitations still apply: for example, electric generation
+and consumption do not constrain its delta-v estimate. The embedded version is
+pinned and does not automatically change when the installed KER is updated.
 
 Click **Undo split** in the same panel to undo the last split. Undo is
 refused if the active vessel changed or any generated node was edited, so it
@@ -180,8 +222,11 @@ GameData/SimpleSplitter/
     Plugins/SimpleSplitter.dll
 ```
 
-Simple Splitter has no runtime dependency on Harmony or on either of the other
-mods in this repository.
+Simple Splitter has no runtime dependency on KER, Harmony or either of the other
+mods in this repository. Its embedded simulator is derived from
+[Kerbal Engineer Redux](https://github.com/jrbudda/KerbalEngineer/tree/54b8b73890b34a8342737f52e3062efc9fd21cc5).
+Upstream provenance and changes are documented in
+`src/SimpleSplitter/Vendor/KerbalEngineer/README.vendor.md`.
 
 Run the headless regression suite with:
 
@@ -193,7 +238,12 @@ The suite links the production planner to an independent analytic Kepler
 adapter. It covers per-count alternatives, cache extension and invalidation,
 stage allocation/fuel, energy compensation, nominal terminal-state preservation,
 normal/antinormal alternatives, different bodies, atmosphere crossings, and
-intermediate transition timing. This does not replace testing the stock
+intermediate transition timing. The `testburn` regression uses its saved orbit
+and measured KER propulsion, including the rotating low-orbit coordinate frame.
+Propulsion adapter tests cover active-stage
+ordering, tank/engine boundaries, vacuum/full-throttle requests, stale snapshots,
+failures and cancellation. The headless adapter does not execute Unity's real
+part snapshot or KER's complete resource simulation. This does not replace testing the stock
 encounter solver or maneuver UI inside KSP.
 
 The duration model follows the [ideal rocket equation](https://www1.grc.nasa.gov/beginners-guide-to-aeronautics/ideal-rocket-equation/).
@@ -204,3 +254,11 @@ The plane-change vector uses the speed-preserving rotation described in
 
 Copy `GameData/SimpleSplitter` into the game's existing `GameData` directory.
 To uninstall, delete only that directory.
+
+## License
+
+The combined Simple Splitter distribution, including the embedded KER code,
+is provided under GPLv3 (`LICENSE.SimpleSplitter`). Original MIT notices are
+retained in `LICENSE`. Other mods in this repository retain their existing
+licenses. Release ZIPs contain the GPL license, attribution and corresponding
+Simple Splitter source under `Source/`; proprietary KSP assemblies are not included.

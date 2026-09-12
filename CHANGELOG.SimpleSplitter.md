@@ -1,5 +1,68 @@
 # Changelog
 
+## 1.2.3
+
+- Replace unclear comparison diagnostics with added Δv in m/s and percent,
+  longest burn duration, and actual simulated arrival early/late at the target.
+  Label units and explain the geometric cosine diagnostic in a tooltip instead
+  of presenting it as a percentage of Δv wasted. Reserve space for tooltips.
+- Batch numerical work into measured frame slices, remove duplicate burn
+  simulations, and speed up RK4 integration without reducing its resolution.
+- Check initial options for every count before retries. Share a two-second
+  refinement allowance across counts, prioritize near-solutions, and retain
+  unfinished batches for subsequent comparisons.
+- Reject failed timed paths before constructing stock preview nodes. All
+  accepted options still pass every stock prefix and timed safety check.
+- Keep comparison results through harmless coasting drift; refresh the live
+  orbit for safety and recheck propulsion before exposing or applying results.
+- Distinguish engine propellants from other supplies in snapshot validation.
+  Normal life-support consumption no longer masquerades as an engine-fuel
+  change; significant changes to carried supply mass still invalidate it.
+- Retry rejected burn counts with redistributed stage delta-v and freshly solved
+  resonance timing and setup energy. Cache retries and each safety result.
+- Report an exhausted sampled search rather than claiming the count impossible.
+- Compare source-orbit inputs near their capture time with float-roundoff
+  tolerance. Recheck timed safety against the live source orbit before applying.
+- Require the simulated timed trajectory to reach the original target within
+  one day in the player's calendar. Do not accept an encounter-free coast merely
+  because it is safe until the original arrival date.
+- Remove the hidden 5% expenditure and largest-burn reduction filters. Report
+  their values for comparison while retaining actual stage fuel limits.
+- Initialize the full time interval before asking KSP to solve copied coast
+  patches, so destination and moon encounters are not silently skipped. Search
+  through closest approach before applying the deadline to SOI entry.
+- Refresh the unchanged original encounter for each live validation, so both
+  paths use the same orbital reference instead of a stale saved arrival time.
+- Reuse the searched stage layout and redistribution, then refresh only that
+  recipe's resonance and burn timers against the live parking orbit before
+  checking or applying it. Numerical drift no longer leaves stale burn times.
+
+## 1.2.2
+
+- Use fixed inertial orbital states throughout planning, timed integration,
+  cache checks and moon-SOI checks. KSP’s vector overload rotates the frame at
+  future times in low orbit; combining it with a current-frame constructor
+  could reject valid splits and immediately invalidate comparison results.
+- Add a regression using the `testburn` orbit and KER propulsion snapshot,
+  including a rotating reference frame and an explicit plane-change burn.
+
+## 1.2.1
+
+- Replace stock stage delta-v data with an embedded, isolated copy of Kerbal
+  Engineer Redux's fuel-flow/staging simulator. KER need not be installed;
+  stock delta-v is never consulted, including when calculation fails.
+- Snapshot the vessel on the main thread and simulate vacuum, configured-limit
+  full-throttle propulsion in the background. Preserve active-engine ordering,
+  post-decoupling masses and individual engine-depletion intervals. Merge
+  equivalent tank-drain intervals so they do not consume extra maneuver nodes.
+- Recheck fuel, engine settings and staging before accepting or applying results.
+  Explain simulation failures and unsupported engine models. Bound background
+  calculation time and release snapshots on cancellation or failure.
+- Allow float-vector noise in cached propulsion comparisons without accumulating
+  drift across requests. Keep independently optimized burn-count results.
+- Include KER attribution, GPL-3.0 license and corresponding source in releases.
+  The combined Simple Splitter distribution is GPL-3.0; other mods retain MIT.
+
 ## 1.2.0
 
 - Compare independently optimized plans for each total burn count, then let

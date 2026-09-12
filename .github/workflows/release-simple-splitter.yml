@@ -86,12 +86,19 @@ jobs:
             "$package_root/GameData/SimpleSplitter/Plugins/"
           cp GameData/SimpleSplitter/SimpleSplitter.version \
             "$package_root/GameData/SimpleSplitter/"
-          cp LICENSE "$package_root/"
+          cp GameData/SimpleSplitter/LICENSE GameData/SimpleSplitter/LICENSE.MIT \
+            GameData/SimpleSplitter/NOTICE.md "$package_root/GameData/SimpleSplitter/"
+          cp LICENSE.SimpleSplitter "$package_root/LICENSE"
+          cp LICENSE "$package_root/LICENSE.MIT"
           cp README.SimpleSplitter.md "$package_root/README.md"
           cp CHANGELOG.SimpleSplitter.md "$package_root/CHANGELOG.md"
+          mkdir -p "$package_root/Source"
+          git archive HEAD src/SimpleSplitter tests/SimpleSplitter.Tests \
+            LICENSE LICENSE.SimpleSplitter README.SimpleSplitter.md \
+            | tar -xf - -C "$package_root/Source"
           (
             cd "$package_root"
-            zip -r "$release_zip" GameData LICENSE README.md CHANGELOG.md
+            zip -r "$release_zip" GameData Source LICENSE LICENSE.MIT README.md CHANGELOG.md
           )
           echo "artifact-zip-path=$release_zip" >> "$GITHUB_OUTPUT"
 
@@ -106,6 +113,10 @@ jobs:
           grep -Fx 'GameData/SimpleSplitter/SimpleSplitter.version' \
             /tmp/simple-splitter-release-files.txt
           grep -Fx 'LICENSE' /tmp/simple-splitter-release-files.txt
+          grep -Fx 'LICENSE.MIT' /tmp/simple-splitter-release-files.txt
+          grep -Fx 'GameData/SimpleSplitter/NOTICE.md' /tmp/simple-splitter-release-files.txt
+          grep -Fx 'Source/src/SimpleSplitter/Vendor/KerbalEngineer/VesselSimulator/Simulation.cs' \
+            /tmp/simple-splitter-release-files.txt
           grep -Fx 'README.md' /tmp/simple-splitter-release-files.txt
           grep -Fx 'CHANGELOG.md' /tmp/simple-splitter-release-files.txt
           if grep -iE '(^|/)0Harmony\.dll$' \

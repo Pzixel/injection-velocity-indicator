@@ -4,38 +4,18 @@ using System;
 using System.Collections.Generic;
 
 internal static class PhysicsGlobals { internal const double GravitationalAcceleration = 9.80665; }
+internal static class KSPUtil
+{
+    internal sealed class Formatter { internal int Day => 21600; }
+    internal static Formatter dateTimeFormatter { get; } = new Formatter();
+}
 
 internal sealed class Vessel
 {
     internal double Mass { get; set; }
     internal int currentStage { get; set; }
-    internal VesselDeltaV VesselDeltaV { get; set; } = new VesselDeltaV();
     internal List<Part> parts { get; } = new List<Part>();
     internal double GetTotalMass() => Mass;
-}
-internal sealed class VesselDeltaV
-{
-    internal bool IsReady { get; set; } = true;
-    internal bool SimulationRunning { get; set; }
-    internal List<DeltaVStageInfo> OperatingStageInfo { get; } = new List<DeltaVStageInfo>();
-}
-internal sealed class DeltaVStageInfo
-{
-    internal int stage { get; set; }
-    internal List<DeltaVCalc> deltaVCalcs { get; } = new List<DeltaVCalc>();
-}
-internal sealed class DeltaVCalc
-{
-    internal double dVinVac { get; set; }
-    internal double startMass { get; set; }
-    internal double endMass { get; set; }
-    internal double thrustVac { get; set; }
-    internal double ispVAC { get; set; }
-    internal List<DeltaVEngineInfo> activeEngines { get; } = new List<DeltaVEngineInfo>();
-}
-internal sealed class DeltaVEngineInfo
-{
-    internal ModuleEngines engine { get; set; } = new ModuleEngines();
 }
 internal sealed class AvailablePart
 {
@@ -44,6 +24,13 @@ internal sealed class AvailablePart
 }
 internal sealed class Part
 {
+    internal uint flightID { get; set; }
+    internal Part? parent { get; set; }
+    internal double mass { get; set; }
+    internal bool fuelCrossFeed { get; set; } = true;
+    internal int ResourcePriority { get; set; }
+    internal int GetResourcePriority() => ResourcePriority;
+    internal List<PartResource> Resources { get; } = new List<PartResource>();
     internal int inverseStage { get; set; }
     internal AvailablePart partInfo { get; set; } = new AvailablePart();
     internal List<PartModule> Modules { get; } = new List<PartModule>();
@@ -51,6 +38,10 @@ internal sealed class Part
 internal class PartModule { internal bool isEnabled { get; set; } = true; }
 internal sealed class ModuleEngines : PartModule
 {
+    internal bool isOperational { get; set; } = true;
+    internal double maxFuelFlow { get; set; }
+    internal double minFuelFlow { get; set; }
+    internal List<Propellant> propellants { get; } = new List<Propellant>();
     internal bool EngineIgnited { get; set; }
     internal bool throttleLocked { get; set; }
     internal bool atmChangeFlow { get; set; }
@@ -130,7 +121,7 @@ internal sealed class Orbit
     private double epoch, meanAtEpoch;
     private Vector3d p, q;
 
-    internal void UpdateFromStateVectors(Vector3d r, Vector3d v, CelestialBody body, double ut)
+    internal void UpdateFromFixedVectors(Vector3d r, Vector3d v, CelestialBody body, double ut)
     {
         referenceBody = body;
         epoch = ut;
@@ -160,7 +151,23 @@ internal sealed class Orbit
         return e * Math.Sinh(h) - h;
     }
 
+    internal struct State { internal Vector3d pos, vel; }
+    internal static double FrameEpoch, FrameRate;
+    private static Vector3d Rotate(Vector3d v, double angle) => new Vector3d(
+        Math.Cos(angle)*v.x-Math.Sin(angle)*v.y, Math.Sin(angle)*v.x+Math.Cos(angle)*v.y, v.z);
+    internal void UpdateFromStateVectors(Vector3d r, Vector3d v, CelestialBody body, double ut)
+        => UpdateFromFixedVectors(Rotate(r, FrameRate*FrameEpoch), Rotate(v, FrameRate*FrameEpoch), body, ut);
     internal void GetOrbitalStateVectorsAtUT(double ut, out Vector3d r, out Vector3d v)
+    {
+        FixedState(ut,out r,out v);
+        r = Rotate(r,-FrameRate*ut); v=Rotate(v,-FrameRate*ut);
+    }
+    internal void GetOrbitalStateVectorsAtUT(double ut, out State state)
+    {
+        FixedState(ut,out Vector3d r,out Vector3d v);
+        state=new State { pos=r,vel=v };
+    }
+    private void FixedState(double ut, out Vector3d r, out Vector3d v)
     {
         double a = semiMajorAxis, e = eccentricity;
         double n = Math.Sqrt(referenceBody.gravParameter / Math.Pow(Math.Abs(a), 3));
@@ -196,7 +203,7 @@ internal sealed class Orbit
 
     internal double TrueAnomalyAtUT(double ut)
     {
-        GetOrbitalStateVectorsAtUT(ut, out Vector3d r, out _);
+        FixedState(ut, out Vector3d r, out _);
         return (Math.Atan2(Vector3d.Dot(r, q), Vector3d.Dot(r, p)) + 2 * Math.PI) % (2 * Math.PI);
     }
     internal double GetDTforTrueAnomalyAtUT(double anomaly, double ut)

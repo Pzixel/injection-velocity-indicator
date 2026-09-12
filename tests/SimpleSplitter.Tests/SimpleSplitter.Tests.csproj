@@ -8,6 +8,9 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Include="..\..\src\SimpleSplitter\PlanningWork.cs" Link="PlanningWork.cs" />
+    <Compile Include="..\..\src\SimpleSplitter\SafePlanSearch.cs" Link="SafePlanSearch.cs" />
+    <Compile Include="..\..\src\SimpleSplitter\OrbitState.cs" Link="OrbitState.cs" />
     <Compile Include="..\..\src\SimpleSplitter\PlanSearchCache.cs" Link="PlanSearchCache.cs" />
     <Compile Include="..\..\src\SimpleSplitter\StockTrajectorySafety.cs" Link="StockTrajectorySafety.cs" />
     <Compile Include="..\..\src\SimpleSplitter\PanelPointerCapture.cs" Link="PanelPointerCapture.cs" />
@@ -19,6 +22,12 @@
     <Compile Include="..\..\src\SimpleSplitter\SplitModels.cs" Link="SplitModels.cs" />
     <Compile Include="..\..\src\SimpleSplitter\FiniteBurnEstimate.cs" Link="FiniteBurnEstimate.cs" />
     <Compile Include="..\..\src\SimpleSplitter\PropulsionReader.cs" Link="PropulsionReader.cs" />
+    <Compile Include="..\..\src\SimpleSplitter\PropulsionFingerprint.cs" Link="PropulsionFingerprint.cs" />
+    <Compile Include="..\..\src\SimpleSplitter\EngineerSegment.cs" Link="EngineerSegment.cs" />
+    <Compile Include="..\..\src\SimpleSplitter\EngineerStageMapper.cs" Link="EngineerStageMapper.cs" />
+    <Compile Include="..\..\src\SimpleSplitter\Vendor\KerbalEngineer\VesselSimulator\Stage.cs" Link="EngineerStage.cs" />
+    <Compile Include="..\..\src\SimpleSplitter\Vendor\KerbalEngineer\LogMsg.cs" Link="EngineerLogMsg.cs" />
+    <Compile Include="..\..\src\SimpleSplitter\Vendor\KerbalEngineer\MyLogger.cs" Link="EngineerLogger.cs" />
     <Compile Include="..\..\src\SimpleSplitter\CandidateRules.cs" Link="CandidateRules.cs" />
     <Compile Include="..\..\src\SimpleSplitter\ResonanceMath.cs" Link="ResonanceMath.cs" />
   </ItemGroup>

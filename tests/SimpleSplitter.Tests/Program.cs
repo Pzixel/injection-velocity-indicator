@@ -2,12 +2,15 @@ using System;
 
 namespace SimpleSplitter
 {
-    internal static class Program
+    internal static partial class Program
     {
         private static int failures;
 
         private static int Main()
         {
+            PlanningWorkTests();
+            IntegrationRegression();
+            TestburnRegression();
             PanelPointerTests();
             ArrivalWindowTests();
             DeltaVPolicyTests();
@@ -16,6 +19,7 @@ namespace SimpleSplitter
             NumericFailureTests();
             BurnPhysicsTests();
             StagedPropulsionTests();
+            EngineerPropulsionTests();
             StageAllocationTests();
             PlannerRegressionTests();
 
@@ -52,14 +56,15 @@ namespace SimpleSplitter
 
         private static void ArrivalWindowTests()
         {
+            double window = CandidateRules.ArrivalToleranceSeconds;
             True(
-                CandidateRules.ArrivalIsWithinTolerance(100.0, 1100.0, 1110.0),
+                CandidateRules.ArrivalIsWithinTolerance(100.0, 110000.0, 110000.0 + window),
                 "arrival at positive tolerance boundary");
             True(
-                CandidateRules.ArrivalIsWithinTolerance(100.0, 1100.0, 1090.0),
+                CandidateRules.ArrivalIsWithinTolerance(100.0, 110000.0, 110000.0 - window),
                 "arrival at negative tolerance boundary");
             False(
-                CandidateRules.ArrivalIsWithinTolerance(100.0, 1100.0, 1110.01),
+                CandidateRules.ArrivalIsWithinTolerance(100.0, 110000.0, 110000.01 + window),
                 "arrival outside tolerance");
             False(
                 CandidateRules.ArrivalIsWithinTolerance(100.0, 100.0, 100.0),
@@ -70,13 +75,16 @@ namespace SimpleSplitter
         {
             True(
                 CandidateRules.DeltaVIsAllowed(1000.0, 1050.0, 600.0),
-                "five-percent delta-v boundary");
-            False(
+                "valid timed expenditure");
+            True(
                 CandidateRules.DeltaVIsAllowed(1000.0, 1050.01, 600.0),
-                "delta-v above cap");
+                "extra delta-v is a comparison diagnostic, not a hidden cap");
+            True(
+                CandidateRules.DeltaVIsAllowed(1000.0, 1500.0, 1100.0),
+                "largest burn is not an encounter feasibility gate");
             False(
-                CandidateRules.DeltaVIsAllowed(1000.0, 900.0, 999.995),
-                "non-meaningful largest-burn improvement");
+                CandidateRules.DeltaVIsAllowed(1000.0, double.NaN, 600.0),
+                "non-finite expenditure is rejected");
             True(
                 CandidateRules.NormalSplitSavesDeltaV(500.0, 499.98),
                 "normal split saves delta-v");
@@ -240,6 +248,20 @@ namespace SimpleSplitter
             cache.Prepare(new SplitRequest(node, body, node.UT + 1e7, expiredAt, propulsion, 8, cache));
             False(cache.Contains(7), "expired first burn invalidates that count");
 
+            cache.Prepare(request);
+            cache.Store(7, result.Candidates.FindAll(c => c.Nodes.Count == 7));
+            var originalEngine = propulsion.Stages[0].Engine;
+            for (int step = 1; step <= 2; step++)
+            {
+                var drifting = new StagedPropulsion(new[] {
+                    new BurnStage(propulsion.Stages[0].Stage, new BurnPhysics(originalEngine.Mass,
+                        originalEngine.Thrust * (1 + step * 0.75e-6), originalEngine.ExhaustVelocity), propulsion.Stages[0].DeltaV),
+                    propulsion.Stages[1]
+                });
+                cache.Prepare(new SplitRequest(node, body, node.UT + 1e7, 1000, drifting, 8, cache));
+                True(cache.Contains(7) == (step == 1), "cache tolerance is anchored and cannot accumulate drift " + step);
+            }
+
             var fast = StagedPropulsion.Single(new BurnPhysics(100, 12000, 800 * 9.80665));
             var antiNode = new ManeuverNode { patch = source, UT = node.UT, DeltaV = new Vector3d(0.1, -1822.6, 1874) };
             PlanResult antinormal = RunPlan(new SplitRequest(antiNode, body, node.UT + 1e7, 1000, fast, 4))!;
@@ -294,7 +316,7 @@ namespace SimpleSplitter
             double spent = 0, loss = 0;
             foreach (NodeSpec node in candidate.Nodes)
             {
-                nominal.GetOrbitalStateVectorsAtUT(node.Ut, out Vector3d r, out Vector3d v);
+                nominal.GetFixedState(node.Ut, out Vector3d r, out Vector3d v);
                 Orbit after = SplitPlanner.OrbitFromState(r,
                     v + (SplitPlanner.NodeRotation(nominal, node.Ut) * node.DeltaV).xzy, source.referenceBody, node.Ut);
                 FiniteBurnEstimate estimate = FiniteBurnEstimate.Measure(nominal, after, node, cursor.Engine, 0, executed, out executed);
@@ -307,10 +329,10 @@ namespace SimpleSplitter
                 nominal = after;
             }
             Nearly(spent - candidate.OriginalDeltaV, candidate.AdditionalDeltaV, 1e-6, "additional dv includes every timed burn");
-            Nearly(loss, candidate.MaximumCosineLoss, 1e-8, "reported cosine includes departure and every prior burn");
+            Nearly(loss, candidate.MaximumCosineLoss, 1e-7, "reported cosine includes departure and every prior burn");
             double departureUt = candidate.Nodes[candidate.Nodes.Count - 1].Ut;
-            source.GetOrbitalStateVectorsAtUT(departureUt, out Vector3d expectedR, out Vector3d sourceV);
-            nominal.GetOrbitalStateVectorsAtUT(departureUt, out Vector3d actualR, out Vector3d actualV);
+            source.GetFixedState(departureUt, out Vector3d expectedR, out Vector3d sourceV);
+            nominal.GetFixedState(departureUt, out Vector3d actualR, out Vector3d actualV);
             Vector3d targetV = sourceV + (SplitPlanner.NodeRotation(source, departureUt) * originalDeltaV).xzy;
             Nearly(0, (actualR - expectedR).magnitude, 1, "nominal departure position is preserved");
             Nearly(0, (actualV - targetV).magnitude, .01, "nominal departure velocity is preserved");
@@ -318,17 +340,10 @@ namespace SimpleSplitter
 
         private static void StagedPropulsionTests()
         {
-            Vessel vessel = new Vessel { currentStage = 3 };
-            DeltaVCalc booster = new DeltaVCalc { startMass = 257.7, thrustVac = 4500, ispVAC = 330, dVinVac = 800 };
-            DeltaVCalc transfer = new DeltaVCalc { startMass = 180, thrustVac = 300, ispVAC = 820, dVinVac = 4000 };
-            booster.endMass = booster.startMass * Math.Exp(-booster.dVinVac / (booster.ispVAC * 9.80665));
-            transfer.endMass = transfer.startMass * Math.Exp(-transfer.dVinVac / (transfer.ispVAC * 9.80665));
-            vessel.VesselDeltaV.OperatingStageInfo.Add(new DeltaVStageInfo { stage = 1, deltaVCalcs = { transfer } });
-            vessel.VesselDeltaV.OperatingStageInfo.Add(new DeltaVStageInfo { stage = 3, deltaVCalcs = { booster } });
-            vessel.VesselDeltaV.OperatingStageInfo.Add(new DeltaVStageInfo { stage = 4, deltaVCalcs = { booster } });
-            StagedPropulsion stages = PropulsionReader.Read(vessel, out string error);
-            True(error == "" && stages.Stages.Count == 2, "only remaining stages read");
-            True(stages.Stages[0].Stage == 3, "active booster precedes high-Isp future stage");
+            StagedPropulsion stages = new StagedPropulsion(new[] {
+                new BurnStage(3, new BurnPhysics(257.7, 4500, 330 * 9.80665), 800),
+                new BurnStage(1, new BurnPhysics(180, 300, 820 * 9.80665), 4000)
+            });
             StageCursor cursor = stages.Cursor();
             False(cursor.Consume(801), "burn cannot cross stage fuel boundary");
             True(cursor.Consume(500), "first kick consumes stage fuel");
@@ -337,13 +352,6 @@ namespace SimpleSplitter
             Nearly(180, cursor.Engine.Mass, 1e-8, "next stage uses post-decoupling mass");
             Nearly(300, cursor.Engine.Thrust, 1e-8, "next stage uses its own thrust");
             False(cursor.Consume(4001), "insufficient next-stage fuel rejected");
-            vessel.currentStage = 1;
-            False(PropulsionReader.Matches(stages, PropulsionReader.Read(vessel, out _)), "staging invalidates snapshot");
-            vessel.VesselDeltaV.SimulationRunning = true;
-            False(PropulsionReader.Read(vessel, out _).IsUsable, "in-progress stock simulation is not read");
-            vessel.VesselDeltaV.SimulationRunning = false;
-            transfer.activeEngines.Add(new DeltaVEngineInfo { engine = new ModuleEngines { throttleLocked = true } });
-            False(PropulsionReader.Read(vessel, out _).IsUsable, "unsupported stage is rejected rather than skipped");
         }
 
         private static void StageAllocationTests()

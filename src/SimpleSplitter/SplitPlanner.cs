@@ -14,7 +14,8 @@ namespace SimpleSplitter
         private const double SoiMargin = 0.005;
         private const double RankingBand = 0.005;
 
-        internal static IEnumerator PlanAsync(SplitRequest request, Action<PlanResult> completed)
+        internal static IEnumerator PlanAsync(SplitRequest request, Action<PlanResult> completed,
+            int onlyCount = 0, bool redistribute = false, double? refinementBias = null)
         {
             string? error = ValidateRequest(request);
             if (error != null)
@@ -24,7 +25,7 @@ namespace SimpleSplitter
             }
             Orbit originalOrbit = request.SourceOrbit;
             CelestialBody body = originalOrbit.referenceBody;
-            originalOrbit.GetOrbitalStateVectorsAtUT(request.OriginalUt,
+            originalOrbit.GetFixedState(request.OriginalUt,
                 out Vector3d position, out Vector3d velocity);
             Vector3d targetVelocity = velocity +
                 (NodeRotation(originalOrbit, request.OriginalUt) * request.OriginalDeltaV).xzy;
@@ -36,34 +37,47 @@ namespace SimpleSplitter
                 (request.OriginalUt - request.Now - reserve) / originalOrbit.period));
             double minimumRadius = body.Radius + (body.atmosphere ? body.atmosphereDepth : 0.0);
             PlanSearchCache cache = request.Cache;
-            cache.Prepare(request);
+            if (!redistribute) cache.Prepare(request);
             for (int totalCount = 2; totalCount <= request.MaximumBurns; totalCount++)
             {
-                if (cache.Contains(totalCount)) continue;
-                var candidates = new List<SplitCandidate>();
+                if (onlyCount != 0 && totalCount != onlyCount) continue;
+                if (redistribute ? cache.IsRefined(totalCount) : cache.Contains(totalCount)) continue;
+                var candidates = redistribute ? cache.ForCount(totalCount) : new List<SplitCandidate>();
                 var testedSchedules = new HashSet<string>();
                 // Explore setup energy as well as stage layouts. No angular-loss
                 // ceiling is used: long burns compete on their simulated error.
-                foreach (double fraction in new[] { 1.0, 0.8, 0.6, 0.4, 0.2 })
+                // A collision is a constraint on a whole trajectory, not proof
+                // that the burn count is impossible. Rebalance each segment and
+                // resolve the resonance afresh, including the setup energy.
+                foreach (double bias in refinementBias.HasValue ? new[] { refinementBias.Value } :
+                    redistribute ? new[] { 0.0, 0.2, -0.2, 0.45, -0.45, 0.75, -0.75 } : new[] { 0.0 })
+                foreach (double fraction in redistribute ? new[] { 1.0, 0.97, 0.94, 0.9, 0.85, 0.8, 0.7 } : new[] { 1.0, 0.8, 0.6, 0.4, 0.2 })
                 {
                     for (int plane = 0; plane <= 1; plane++)
                     {
                         int count = totalCount - 1 - plane;
                         if (count < 1 || count >= available ||
                             (plane == 1 && Math.Abs(request.OriginalDeltaV.y) < ComponentTolerance)) continue;
-                        double setupCeiling = Math.Min(request.OriginalDeltaV.z, magnitude) * fraction;
-                        request.Progress = "Searching " + totalCount + " burns (max " + request.MaximumBurns + ")...";
+                        double setupCeiling = Math.Min(request.OriginalDeltaV.z, magnitude);
+                        if (redistribute) setupCeiling = Math.Min(setupCeiling,
+                            Math.Sqrt(2 * body.gravParameter / position.magnitude) - velocity.magnitude);
+                        setupCeiling *= fraction;
+                        request.Progress = (redistribute ? "Redistributing " : "Searching ") + totalCount + " burns (max " + request.MaximumBurns + ")...";
                         List<KickSchedule> schedules = KickSchedule.FindAll(count, body.gravParameter,
                             position.magnitude, velocity.magnitude, tangentFraction, minimumRadius,
                             body.sphereOfInfluence * (1.0 - SoiMargin), originalOrbit.period,
-                            available, setupCeiling, request.Propulsion, double.PositiveInfinity);
+                            available, setupCeiling, request.Propulsion, double.PositiveInfinity, distributionBias: bias);
                         yield return null;
                         // Bound full simulations per sampled energy while keeping
                         // alternatives in case the stock solver rejects the winner.
                         for (int option = 0; option < Math.Min(3, schedules.Count); option++)
                         {
                             KickSchedule schedule = schedules[option];
-                            string key = plane + ":" + string.Join(",", schedule.StageKickCounts) + ":" + Math.Round(schedule.SetupDeltaV, 5);
+                            // Different search parameters can produce the same
+                            // burns (especially a one-kick stage, where bias has
+                            // no effect). Deduplicate before expensive integration.
+                            string key = plane + ":" + string.Join(",", schedule.StageKickCounts) + ":" +
+                                string.Join(",", schedule.DeltaVs.ConvertAll(dv => Math.Round(dv, 5)));
                             if (!testedSchedules.Add(key)) continue;
                             EvaluationBudget budget = new EvaluationBudget();
                             StagedPropulsion nominalPropulsion = request.Propulsion;
@@ -93,7 +107,7 @@ namespace SimpleSplitter
                                             position.magnitude, velocity.magnitude, tangentFraction, minimumRadius,
                                             body.sphereOfInfluence * (1 - SoiMargin), originalOrbit.period,
                                             available, setupCeiling, nominalPropulsion, double.PositiveInfinity,
-                                            adjustedSchedule!.StageKickCounts);
+                                            adjustedSchedule!.StageKickCounts, bias);
                                         if (adjustedSchedule == null) done = true;
                                         budget = new EvaluationBudget();
                                     }
@@ -105,13 +119,14 @@ namespace SimpleSplitter
                     }
                 }
                 candidates.Sort(CompareChoices);
-                if (candidates.Count > 3) candidates.RemoveRange(3, candidates.Count - 3);
+                if (!redistribute && candidates.Count > 3) candidates.RemoveRange(3, candidates.Count - 3);
                 cache.Store(totalCount, candidates);
+                if (redistribute && !refinementBias.HasValue) cache.MarkRefined(totalCount);
                 yield return null;
             }
             var results = cache.GetCandidates(request.MaximumBurns);
             completed(results.Count == 0
-                ? PlanResult.Failure("Search found no plan within " + request.MaximumBurns + " burns and the stage fuel / delta-v limits.")
+                ? PlanResult.Failure("No executable option found in the sampled distributions through " + request.MaximumBurns + " burns.")
                 : PlanResult.Success(results));
         }
 
@@ -123,6 +138,62 @@ namespace SimpleSplitter
             if (comparison != 0) return comparison;
             comparison = a.Score.TotalDeltaV.CompareTo(b.Score.TotalDeltaV);
             return comparison != 0 ? comparison : a.Score.CompareTo(b.Score);
+        }
+
+        // Reuse the searched stage layout, distribution and setup ceiling, but
+        // solve its resonance and burn timers against the current parking orbit.
+        // This is one selected recipe, not another search through all counts.
+        internal static IEnumerator RefreshAsync(SplitRequest request, SplitCandidate candidate,
+            Action<SplitCandidate?> completed)
+        {
+            KickSchedule? recipe = candidate.Schedule;
+            if (recipe == null) { completed(candidate); yield break; }
+            Orbit source = request.SourceOrbit;
+            CelestialBody body = source.referenceBody;
+            source.GetFixedState(request.OriginalUt, out Vector3d position, out Vector3d velocity);
+            Vector3d targetVelocity = velocity + (NodeRotation(source, request.OriginalUt) * request.OriginalDeltaV).xzy;
+            double tangent = Math.Min(1, Vector3d.Cross(position.normalized, velocity.normalized).magnitude);
+            double reserve = request.Propulsion.Cursor().Engine.Duration(Math.Min(request.OriginalDeltaV.magnitude,
+                request.Propulsion.Cursor().Remaining)) + MinimumLeadTime;
+            int available = (int)Math.Min(MaximumLeadOrbits, Math.Floor((request.OriginalUt - request.Now - reserve) / source.period));
+            StagedPropulsion nominalPropulsion = request.Propulsion;
+            bool plane = candidate.Nodes.Count == recipe.DeltaVs.Count + 2;
+            for (int adjustment = 0; adjustment <= 12; adjustment++)
+            {
+                KickSchedule? schedule = KickSchedule.Find(recipe.DeltaVs.Count, body.gravParameter,
+                    position.magnitude, velocity.magnitude, tangent,
+                    body.Radius + (body.atmosphere ? body.atmosphereDepth : 0),
+                    body.sphereOfInfluence * (1 - SoiMargin), source.period, available,
+                    recipe.SearchCeiling, nominalPropulsion, double.PositiveInfinity,
+                    recipe.StageKickCounts, recipe.DistributionBias);
+                if (schedule == null) { completed(null); yield break; }
+                var budget = new EvaluationBudget();
+                bool adjustStage = false;
+                while (!adjustStage)
+                {
+                    bool done = false;
+                    SplitCandidate? refreshed = null;
+                    budget.BeginSlice();
+                    try
+                    {
+                        refreshed = BuildCandidate(request, position, velocity, targetVelocity, schedule, plane);
+                        done = true;
+                    }
+                    catch (YieldPlanningException) { }
+                    catch (StageCapacityAdjustment change)
+                    {
+                        var stages = new List<BurnStage>(nominalPropulsion.Stages);
+                        BurnStage stage = stages[change.Index];
+                        stages[change.Index] = new BurnStage(stage.Stage, stage.Engine, stage.DeltaV + change.Adjustment);
+                        nominalPropulsion = new StagedPropulsion(stages);
+                        adjustStage = true;
+                    }
+                    finally { EvaluationBudget.Current = null; }
+                    if (done) { completed(refreshed); yield break; }
+                    yield return null;
+                }
+            }
+            completed(null);
         }
 
         private static string? ValidateRequest(SplitRequest request)
@@ -206,7 +277,7 @@ namespace SimpleSplitter
                 double dt = orbit.GetDTforTrueAnomalyAtUT(opposite, ut);
                 if (dt <= 0.0) dt += orbit.period;
                 double planeUt = ut + dt;
-                orbit.GetOrbitalStateVectorsAtUT(planeUt, out Vector3d planePosition, out Vector3d planeVelocity);
+                orbit.GetFixedState(planeUt, out Vector3d planePosition, out Vector3d planeVelocity);
                 if (Vector3d.Dot(planePosition.normalized, position.normalized) > -1.0 + 1e-10) return null;
                 Vector3d radial = planePosition.normalized;
                 Vector3d targetNormal = Vector3d.Cross(position, targetVelocity).normalized;
@@ -236,7 +307,7 @@ namespace SimpleSplitter
                 fuelSpent += planeNode.BurnDeltaV;
                 largest = Math.Max(largest, planeNode.BurnDeltaV);
             }
-            orbit.GetOrbitalStateVectorsAtUT(request.OriginalUt, out Vector3d finalPosition, out Vector3d finalVelocity);
+            orbit.GetFixedState(request.OriginalUt, out Vector3d finalPosition, out Vector3d finalVelocity);
             if ((finalPosition - position).magnitude > Math.Max(1.0, position.magnitude * 1e-7)) return null;
             Vector3d finalDeltaV = ToNodeCoordinates(orbit, request.OriginalUt, targetVelocity - finalVelocity);
             if (splitPlane && Math.Abs(finalDeltaV.y) > ComponentTolerance) return null;
@@ -249,7 +320,7 @@ namespace SimpleSplitter
             Orbit targetOrbit = OrbitFromState(position, targetVelocity, body, request.OriginalUt);
             if (!FiniteBurnEstimate.TargetDeparture(orbit, targetOrbit, final, finalEngine, 0, executed,
                 out final, out FiniteBurnEstimate execution, out double excessError,
-                Math.Min(propulsion.Remaining, request.OriginalDeltaV.magnitude * CandidateRules.DeltaVOverheadFactor - fuelSpent))) return null;
+                propulsion.Remaining)) return null;
             double total = fuelSpent + final.BurnDeltaV;
             largest = Math.Max(largest, final.BurnDeltaV);
             if (!CandidateRules.DeltaVIsAllowed(request.OriginalDeltaV.magnitude, total, largest)) return null;
@@ -265,13 +336,13 @@ namespace SimpleSplitter
             return new SplitCandidate(nodes,
                 new CandidateScore(largest, total, 0.0, firstUt, nodes.Count,
                     request.OriginalDeltaV.magnitude * RankingBand), schedule.LeadOrbits,
-                schedule.SetupDeltaV, maxSetupLoss, departure, execution, excessError, request.OriginalDeltaV.magnitude);
+                schedule.SetupDeltaV, maxSetupLoss, departure, execution, excessError, request.OriginalDeltaV.magnitude, schedule);
         }
 
         internal static Orbit OrbitFromState(Vector3d position, Vector3d velocity, CelestialBody body, double ut)
         {
             Orbit orbit = new Orbit();
-            orbit.UpdateFromStateVectors(position, velocity, body, ut);
+            orbit.UpdateFromFixedVectors(position, velocity, body, ut);
             return orbit;
         }
 
@@ -280,7 +351,7 @@ namespace SimpleSplitter
 
         internal static QuaternionD NodeRotation(Orbit orbit, double ut)
         {
-            orbit.GetOrbitalStateVectorsAtUT(ut, out Vector3d position, out Vector3d velocity);
+            orbit.GetFixedState(ut, out Vector3d position, out Vector3d velocity);
             return QuaternionD.LookRotation(velocity.xzy, Vector3d.Cross(-position.xzy, velocity.xzy));
         }
 

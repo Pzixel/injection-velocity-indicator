@@ -55,5 +55,7 @@
   <Target Name="PrepareReleaseGameData" AfterTargets="Build" Condition="'$(Configuration)' == 'Release'">
     <MakeDir Directories="$(PackageDir)" />
     <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(PackageDir)" />
+    <Copy SourceFiles="$(MSBuildProjectDirectory)\..\..\LICENSE.SimpleSplitter" DestinationFiles="$(PackageDir)\..\LICENSE" />
+    <Copy SourceFiles="$(MSBuildProjectDirectory)\..\..\LICENSE" DestinationFiles="$(PackageDir)\..\LICENSE.MIT" />
   </Target>
 </Project>

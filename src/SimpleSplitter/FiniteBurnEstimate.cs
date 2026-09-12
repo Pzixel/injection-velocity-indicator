@@ -44,9 +44,9 @@ namespace SimpleSplitter
             Func<Vector3d, double, bool>? positionIsSafe = null)
         {
             executedAfter = executedBefore;
-            before.GetOrbitalStateVectorsAtUT(node.Ut, out Vector3d center, out Vector3d velocity);
+            before.GetFixedState(node.Ut, out Vector3d center, out Vector3d velocity);
             double startUt = node.Ut - node.StartOffset;
-            executedBefore.GetOrbitalStateVectorsAtUT(startUt, out Vector3d r, out Vector3d v);
+            executedBefore.GetFixedState(startUt, out Vector3d r, out Vector3d v);
             Vector3d direction = (SplitPlanner.NodeRotation(before, node.Ut) * node.DeltaV).xzy.normalized;
             double mu = before.referenceBody.gravParameter;
             double safeRadius = before.referenceBody.Radius +
@@ -56,29 +56,46 @@ namespace SimpleSplitter
             int steps = Math.Max(64, Math.Min(8192, (int)Math.Ceiling(node.Duration / 0.5)));
             double step = node.Duration / steps;
             double cosineLoss = 0.0;
+            // Keep the RK4 hot loop in scalars. Vector3d's operators live in
+            // KSP's assembly and Mono does not optimize this chain of temporary
+            // structs well. The integration method and 0.5-second step are unchanged.
+            double x = r.x, y = r.y, z = r.z, vx = v.x, vy = v.y, vz = v.z;
+            Vector3d centerUnit = center.normalized;
+            double tx = direction.x * engine.Thrust, ty = direction.y * engine.Thrust, tz = direction.z * engine.Thrust;
+            double half = step * 0.5, quarterSquare = step * step * 0.25;
             for (int i = 0; i <= steps; i++)
             {
-                cosineLoss = Math.Max(cosineLoss, 1.0 - Vector3d.Dot(center.normalized, r.normalized));
-                if (r.magnitude <= safeRadius || r.magnitude >= before.referenceBody.sphereOfInfluence ||
-                    (positionIsSafe != null && !positionIsSafe(r, startUt + i * step)))
+                double radiusSquared = x * x + y * y + z * z;
+                double radius = Math.Sqrt(radiusSquared);
+                cosineLoss = Math.Max(cosineLoss, 1.0 - (centerUnit.x * x + centerUnit.y * y + centerUnit.z * z) / radius);
+                if (radius <= safeRadius || radius >= before.referenceBody.sphereOfInfluence ||
+                    (positionIsSafe != null && !positionIsSafe(new Vector3d(x, y, z), startUt + i * step)))
                     return new FiniteBurnEstimate(double.NaN, double.NaN, double.NaN, double.NaN);
                 if (i == steps) break;
                 double mass = initialMass - flow * (i * step);
-                Vector3d a1 = Acceleration(r, direction, mu, engine.Thrust / mass);
-                Vector3d v2 = v + a1 * (step * 0.5);
-                Vector3d a2 = Acceleration(r + v * (step * 0.5), direction, mu,
-                    engine.Thrust / (mass - flow * step * 0.5));
-                Vector3d v3 = v + a2 * (step * 0.5);
-                Vector3d a3 = Acceleration(r + v2 * (step * 0.5), direction, mu,
-                    engine.Thrust / (mass - flow * step * 0.5));
-                Vector3d v4 = v + a3 * step;
-                Vector3d a4 = Acceleration(r + v3 * step, direction, mu,
-                    engine.Thrust / (mass - flow * step));
-                r += (v + 2.0 * v2 + 2.0 * v3 + v4) * (step / 6.0);
-                v += (a1 + 2.0 * a2 + 2.0 * a3 + a4) * (step / 6.0);
+                double gravity = -mu / (radius * radiusSquared);
+                double a1x = x * gravity + tx / mass, a1y = y * gravity + ty / mass, a1z = z * gravity + tz / mass;
+                double halfMass = mass - flow * half;
+                ScalarAcceleration(x + vx * half, y + vy * half, z + vz * half,
+                    mu, tx / halfMass, ty / halfMass, tz / halfMass, out double a2x, out double a2y, out double a2z);
+                ScalarAcceleration(x + vx * half + a1x * quarterSquare, y + vy * half + a1y * quarterSquare,
+                    z + vz * half + a1z * quarterSquare, mu, tx / halfMass, ty / halfMass, tz / halfMass,
+                    out double a3x, out double a3y, out double a3z);
+                double endMass = mass - flow * step;
+                ScalarAcceleration(x + vx * step + a2x * 2 * quarterSquare, y + vy * step + a2y * 2 * quarterSquare,
+                    z + vz * step + a2z * 2 * quarterSquare, mu, tx / endMass, ty / endMass, tz / endMass,
+                    out double a4x, out double a4y, out double a4z);
+                x += vx * step + (a1x + a2x + a3x) * (step * step / 6);
+                y += vy * step + (a1y + a2y + a3y) * (step * step / 6);
+                z += vz * step + (a1z + a2z + a3z) * (step * step / 6);
+                vx += (a1x + 2 * a2x + 2 * a3x + a4x) * (step / 6);
+                vy += (a1y + 2 * a2y + 2 * a3y + a4y) * (step / 6);
+                vz += (a1z + 2 * a2z + 2 * a3z + a4z) * (step / 6);
             }
+            r = new Vector3d(x, y, z);
+            v = new Vector3d(vx, vy, vz);
             double endUt = startUt + node.Duration;
-            after.GetOrbitalStateVectorsAtUT(endUt, out Vector3d idealR, out Vector3d idealV);
+            after.GetFixedState(endUt, out Vector3d idealR, out Vector3d idealV);
             double initialEnergy = velocity.sqrMagnitude * 0.5 - mu / center.magnitude;
             double idealEnergy = idealV.sqrMagnitude * 0.5 - mu / idealR.magnitude;
             double actualEnergy = v.sqrMagnitude * 0.5 - mu / r.magnitude;
@@ -88,8 +105,13 @@ namespace SimpleSplitter
             return new FiniteBurnEstimate(cosineLoss, energyLoss, (r - idealR).magnitude, (v - idealV).magnitude);
         }
 
-        private static Vector3d Acceleration(Vector3d r, Vector3d direction, double mu, double thrustAcceleration)
-            => r * (-mu / (r.magnitude * r.sqrMagnitude)) + direction * thrustAcceleration;
+        private static void ScalarAcceleration(double x, double y, double z, double mu,
+            double tx, double ty, double tz, out double ax, out double ay, out double az)
+        {
+            double square = x * x + y * y + z * z;
+            double gravity = -mu / (Math.Sqrt(square) * square);
+            ax = x * gravity + tx; ay = y * gravity + ty; az = z * gravity + tz;
+        }
 
         // Compensate finite-duration energy loss through the burn timer while
         // leaving the stock impulse node as the intended orbit. In particular,
@@ -118,7 +140,7 @@ namespace SimpleSplitter
                 double actualEnergy = -mu / (2.0 * executedAfter.semiMajorAxis);
                 double error = targetEnergy - actualEnergy;
                 if (Math.Abs(error) < 0.001) return true;
-                executedAfter.GetOrbitalStateVectorsAtUT(timed.Ut + timed.Duration - timed.StartOffset,
+                executedAfter.GetFixedState(timed.Ut + timed.Duration - timed.StartOffset,
                     out _, out Vector3d velocity);
                 Vector3d direction = (SplitPlanner.NodeRotation(before, nominal.Ut) * nominal.DeltaV).xzy.normalized;
                 double derivative = Vector3d.Dot(velocity, direction);
@@ -137,8 +159,8 @@ namespace SimpleSplitter
             // Earlier finite kicks can rotate the line of apsides slightly even
             // after their energy/period is corrected. Burn at the actual opposite
             // plane intersection, not blindly at the nominal apoapsis time.
-            before.GetOrbitalStateVectorsAtUT(nominal.Ut, out Vector3d desiredPosition, out _);
-            executedBefore.GetOrbitalStateVectorsAtUT(nominal.Ut, out Vector3d r, out Vector3d v);
+            before.GetFixedState(nominal.Ut, out Vector3d desiredPosition, out _);
+            executedBefore.GetFixedState(nominal.Ut, out Vector3d r, out Vector3d v);
             Vector3d normal = Vector3d.Cross(r, v).normalized;
             double angle = Math.Atan2(Vector3d.Dot(Vector3d.Cross(r, desiredPosition), normal),
                 Vector3d.Dot(r, desiredPosition));
@@ -208,7 +230,7 @@ namespace SimpleSplitter
         {
             if (orbit.eccentricity <= 1.0 || orbit.semiMajorAxis >= 0.0)
                 return new Vector3d(double.NaN, double.NaN, double.NaN);
-            orbit.GetOrbitalStateVectorsAtUT(ut, out Vector3d r, out Vector3d v);
+            orbit.GetFixedState(ut, out Vector3d r, out Vector3d v);
             Vector3d h = Vector3d.Cross(r, v);
             Vector3d e = Vector3d.Cross(v, h) / orbit.referenceBody.gravParameter - r.normalized;
             Vector3d p = e.normalized;

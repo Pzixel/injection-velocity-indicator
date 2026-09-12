@@ -60,8 +60,8 @@ namespace SimpleSplitter
 
     internal static class CandidateRules
     {
-        internal const double DeltaVOverheadFactor = 1.05;
-        internal const double ArrivalToleranceFactor = 0.01;
+        // One day in the player's calendar (Kerbin/Earth/custom formatter).
+        internal static double ArrivalToleranceSeconds => KSPUtil.dateTimeFormatter.Day;
         internal const double MeaningfulImprovement = 0.01;
 
         internal static bool ArrivalIsWithinTolerance(
@@ -73,7 +73,7 @@ namespace SimpleSplitter
             return IsFinite(duration) && duration > 0.0 &&
                 IsFinite(candidateArrivalUt) &&
                 Math.Abs(candidateArrivalUt - originalArrivalUt) <=
-                    ArrivalToleranceFactor * duration;
+                    ArrivalToleranceSeconds;
         }
 
         internal static bool DeltaVIsAllowed(
@@ -82,9 +82,8 @@ namespace SimpleSplitter
             double largestBurn)
         {
             return IsFinite(originalDeltaV) && originalDeltaV > 0.0 &&
-                IsFinite(totalDeltaV) && IsFinite(largestBurn) &&
-                totalDeltaV <= originalDeltaV * DeltaVOverheadFactor &&
-                largestBurn + MeaningfulImprovement < originalDeltaV;
+                IsFinite(totalDeltaV) && totalDeltaV > 0.0 &&
+                IsFinite(largestBurn) && largestBurn > 0.0 && largestBurn <= totalDeltaV;
         }
 
         internal static bool NormalSplitSavesDeltaV(

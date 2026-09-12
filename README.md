@@ -65,3 +65,8 @@ CI builds every push and pull request against stripped KSP 1.12.5 interfaces. Ha
 Maintainers publish a release from the GitHub Actions **Release** workflow by supplying a `MAJOR.MINOR.PATCH` version. The workflow updates the KSP-AVC version file and changelog, builds Release, verifies the ZIP contents, commits the release version, and publishes `InjectionVelocityIndicator-<version>.zip`.
 
 CKAN metadata is maintained in `CKAN/InjectionVelocityIndicator.netkan`. It selects only `InjectionVelocityIndicator-<version>.zip` assets from the shared GitHub releases, reads KSP compatibility from the packaged `.version` file, installs only `GameData/InjectionVelocityIndicator`, and depends on `Harmony2`.
+
+Injection Velocity Indicator and Maneuver Orbit Jumper retain the repository's
+MIT license. The separately packaged Simple Splitter includes Kerbal Engineer
+Redux code and is distributed under GPLv3; see `LICENSE.SimpleSplitter` and
+`README.SimpleSplitter.md` for its attribution and source distribution.

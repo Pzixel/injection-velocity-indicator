@@ -5,9 +5,10 @@ namespace SimpleSplitter
 {
     internal sealed partial class SimpleSplitterAddon
     {
-        private IEnumerator ValidateFinitePath(Vessel vessel, SplitRequest request, SplitCandidate candidate, Action<bool> completed)
+        private IEnumerator ValidateFinitePath(Vessel vessel, SplitRequest request, SplitCandidate candidate, Orbit liveSource, Action<bool> completed)
         {
-            Orbit nominal = request.SourceOrbit, executed = request.SourceOrbit;
+            candidate.TimedArrivalOffsetSeconds = double.NaN;
+            Orbit nominal = liveSource, executed = liveSource;
             StageCursor engine = request.Propulsion.Cursor();
             for (int i = 0; i < candidate.Nodes.Count; i++)
             {
@@ -18,7 +19,7 @@ namespace SimpleSplitter
                 request.Progress = "Checking timed execution: " + candidate.Nodes.Count + " burns, burn " + (i + 1) + "...";
                 try
                 {
-                    nominal.GetOrbitalStateVectorsAtUT(node.Ut, out Vector3d r, out Vector3d v);
+                    nominal.GetFixedState(node.Ut, out Vector3d r, out Vector3d v);
                     Orbit after = SplitPlanner.OrbitFromState(r,
                         v + (SplitPlanner.NodeRotation(nominal, node.Ut) * node.DeltaV).xzy, nominal.referenceBody, node.Ut);
                     CelestialBody source = nominal.referenceBody;
@@ -32,9 +33,12 @@ namespace SimpleSplitter
                     {
                         double end = node.Ut + node.Duration - node.StartOffset;
                         double until = i + 1 < candidate.Nodes.Count
-                            ? candidate.Nodes[i + 1].Ut - candidate.Nodes[i + 1].StartOffset : request.ArrivalUt;
+                            ? candidate.Nodes[i + 1].Ut - candidate.Nodes[i + 1].StartOffset
+                            : request.ArrivalUt + CandidateRules.ArrivalToleranceSeconds;
                         safe = CheckFiniteCoast(executed, end, until, i + 1 == candidate.Nodes.Count,
-                            request.TargetBody, vessel.patchedConicSolver, out error);
+                            request, vessel.patchedConicSolver, out error, out double arrivalUt);
+                        if (safe && i + 1 == candidate.Nodes.Count)
+                            candidate.TimedArrivalOffsetSeconds = arrivalUt - request.ArrivalUt;
                     }
                     nominal = after;
                 }
@@ -42,6 +46,7 @@ namespace SimpleSplitter
                 if (!safe)
                 {
                     choiceErrors[candidate.Nodes.Count] = error;
+                    UnityEngine.Debug.Log("[SimpleSplitter] " + candidate.Nodes.Count + "-burn timed option rejected: " + error);
                     completed(false);
                     yield break;
                 }
@@ -54,16 +59,18 @@ namespace SimpleSplitter
         {
             foreach (CelestialBody moon in source.orbitingBodies)
             {
-                moon.orbit.GetOrbitalStateVectorsAtUT(ut, out Vector3d moonPosition, out _);
+                moon.orbit.GetFixedState(ut, out Vector3d moonPosition, out _);
                 if ((position - moonPosition).magnitude <= moon.sphereOfInfluence) return false;
             }
             return true;
         }
 
         private static bool CheckFiniteCoast(Orbit orbit, double start, double until, bool departure,
-            CelestialBody target, PatchedConicSolver solver, out string error)
+            SplitRequest request, PatchedConicSolver solver, out string error, out double arrivalUt)
         {
             error = string.Empty;
+            arrivalUt = double.NaN;
+            string trace = string.Empty;
             var parameters = new PatchedConics.SolverParameters
             {
                 maxGeometrySolverIterations = solver.maxGeometrySolverIterations,
@@ -73,11 +80,20 @@ namespace SimpleSplitter
             // Work on independent copies. The real flight plan stays untouched.
             for (int i = 0; i < 64 && start < until; i++)
             {
-                orbit.GetOrbitalStateVectorsAtUT(start, out Vector3d r, out Vector3d v);
+                orbit.GetFixedState(start, out Vector3d r, out Vector3d v);
                 Orbit patch = SplitPlanner.OrbitFromState(r, v, orbit.referenceBody, start);
                 patch.StartUT = start;
+                // Match KSP's initial search span. It bounds CLOSEST APPROACH,
+                // which may occur well after the SOI entry we need to check.
+                // Clipping this to `until` misses an encounter whose entry is
+                // before the next burn/arrival deadline but closest approach
+                // is later. Clip the resulting transition below instead.
+                patch.EndUT = patch.eccentricity < 1.0 ? start + patch.period : double.PositiveInfinity;
                 Orbit next = new Orbit();
-                bool transition = PatchedConics.CalculatePatch(patch, next, start, parameters, target);
+                bool transition = PatchedConics.CalculatePatch(patch, next, start, parameters, request.TargetBody);
+                if (departure) trace += string.Format(" {0}:{1:R}->{2:R} {3} next={4};",
+                    patch.referenceBody.bodyName, start, patch.EndUT, patch.patchEndTransition,
+                    next.referenceBody == null ? "none" : next.referenceBody.bodyName);
                 double end = Math.Min(until, patch.EndUT);
                 if (!CandidateRules.IsFinite(end) || end <= start || !StockTrajectorySafety.AboveAtmosphere(patch, start, end))
                 { error = "Timed coast intersects a surface/atmosphere or could not be solved."; return false; }
@@ -88,7 +104,16 @@ namespace SimpleSplitter
                     { error = "Timed intermediate coast impacts or changes SOI."; return false; }
                     if (patch.patchEndTransition == Orbit.PatchTransitionType.ENCOUNTER)
                     {
-                        if (next.referenceBody == target) return true;
+                        if (next.referenceBody == request.TargetBody)
+                        {
+                            if (!CandidateRules.ArrivalIsWithinTolerance(request.OriginalUt, request.ArrivalUt, next.StartUT))
+                            { error = "Timed target encounter is outside the arrival window (" +
+                                (next.StartUT - request.ArrivalUt).ToString("+0;-0;0") + " s)."; return false; }
+                            UnityEngine.Debug.Log(string.Format("[SimpleSplitter] Timed encounter: target={0}, SOI-entry UT={1:R}, difference={2:R} s.",
+                                request.TargetBody.bodyName, next.StartUT, next.StartUT - request.ArrivalUt));
+                            arrivalUt = next.StartUT;
+                            return true;
+                        }
                         error = "Timed departure encounters an unintended body.";
                         return false;
                     }
@@ -99,7 +124,13 @@ namespace SimpleSplitter
                 else orbit = patch;
                 start = end;
             }
-            if (start >= until) return true;
+            if (start >= until)
+            {
+                if (!departure) return true;
+                error = "Timed departure does not reach the target within the arrival window.";
+                UnityEngine.Debug.Log("[SimpleSplitter] Coast trace:" + trace);
+                return false;
+            }
             error = "Timed coast exceeded the patch-check limit.";
             return false;
         }
