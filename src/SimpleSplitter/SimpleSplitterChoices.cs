@@ -38,7 +38,7 @@ namespace SimpleSplitter
             request.Progress = "Refreshing " + candidate.Nodes.Count + " burns against the live orbit...";
             SplitCandidate? refreshed = null;
             yield return SplitPlanner.RefreshAsync(request, candidate, value => refreshed = value);
-            if (refreshed == null) { completed(false); yield break; }
+            if (refreshed == null || !SourceNodeMatches(vessel, request)) { completed(false); yield break; }
             candidate.LiveCandidate = refreshed;
             candidate = refreshed;
             // Recheck timed safety against the live orbit. Roundoff accepted by
@@ -47,10 +47,18 @@ namespace SimpleSplitter
             current.GetFixedState(request.Now, out Vector3d r, out Vector3d v);
             Orbit liveSource = SplitPlanner.OrbitFromState(r, v, current.referenceBody, request.Now);
             // Reject a failed timed execution before constructing stock nodes.
-            // The stock prefix checks are still required for every accepted row.
+            // Converted nodes encode commands on the predicted real pre-burn
+            // orbit. Their instantaneous map preview is not a safety oracle.
             bool finiteSafe = false;
             yield return ValidateFinitePath(vessel, request, candidate, liveSource, value => finiteSafe = value);
-            if (!finiteSafe) { completed(false); yield break; }
+            if (!finiteSafe || !SourceNodeMatches(vessel, request) ||
+                candidate.Nodes[0].Ut - candidate.Nodes[0].StartOffset <= Planetarium.GetUniversalTime() + 30)
+            { completed(false); yield break; }
+            if (candidate.IsConverted)
+            {
+                completed(CheckCommandNodes(vessel.patchedConicSolver, request, candidate));
+                yield break;
+            }
             // Every synchronous prefix check restores the original in finally.
             // Cancellation, scene switches, and user edits at any yield therefore
             // never leave a partially constructed preview in the flight plan.
@@ -70,6 +78,23 @@ namespace SimpleSplitter
                 yield return null;
             }
             completed(true);
+        }
+
+        private static bool CheckCommandNodes(PatchedConicSolver solver, SplitRequest request, SplitCandidate candidate)
+        {
+            try
+            {
+                RemoveAllNodes(solver);
+                AddNodes(solver, candidate.Nodes);
+                solver.UpdateFlightPlan();
+                return NodesMatch(solver.maneuverNodes, candidate.Nodes);
+            }
+            catch (Exception exception)
+            {
+                UnityEngine.Debug.Log("[SimpleSplitter] Unable to create finite commands: " + exception.Message);
+                return false;
+            }
+            finally { RestoreSingleNode(solver, new NodeSpec(request.OriginalUt, request.OriginalDeltaV)); }
         }
 
         private static bool CheckPrefix(PatchedConicSolver solver, SplitRequest request, SplitCandidate candidate,

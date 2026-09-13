@@ -60,7 +60,9 @@ namespace SimpleSplitter
                 double spread = Math.Acos(Math.Max(-1, Math.Min(1, 1 - candidate.MaximumCosineLoss))) * 180 / Math.PI;
                 string[] valueTips = { tips[1], tips[2],
                     "Total engine-on time: " + FormatPlanDuration(totalDuration) + ". Peak angle from node position: " + spread.ToString("F1") +
-                    "° (1 − cos: " + candidate.MaximumCosineLoss.ToString("P1") + "). Geometry only; not Δv wasted or encounter error.", tips[4] };
+                    "° (1 − cos: " + candidate.MaximumCosineLoss.ToString("P1") + "). Geometry only; not Δv wasted or encounter error.",
+                    "Departure match: " + candidate.TrajectoryError.PositionMeters.ToString("F2") + " m, " +
+                    candidate.TrajectoryError.VelocityMetersPerSecond.ToString("F5") + " m/s at the same time on the original trajectory. " + tips[4] };
                 x = rowWidth * shares[0];
                 for (int i = 0; i < values.Length; i++)
                 {

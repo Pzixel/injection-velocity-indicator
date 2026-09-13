@@ -10,6 +10,14 @@ namespace SimpleSplitter
             candidate.TimedArrivalOffsetSeconds = double.NaN;
             Orbit nominal = liveSource, executed = liveSource;
             StageCursor engine = request.Propulsion.Cursor();
+            // Before the first burn the real path is still the original solved
+            // stock coast. Reuse that patch, including its encounter horizon,
+            // rather than resampling thousands of identical parking periods.
+            if (vessel.patchedConicSolver.flightPlan.Count == 0 ||
+                !StockTrajectorySafety.CoastIsSafe(vessel.patchedConicSolver.flightPlan[0],
+                    liveSource.referenceBody, request.Now,
+                    candidate.Nodes[0].Ut - candidate.Nodes[0].StartOffset, out _))
+            { completed(false); yield break; }
             for (int i = 0; i < candidate.Nodes.Count; i++)
             {
                 if (!SourceNodeMatches(vessel, request)) { completed(false); yield break; }
@@ -19,8 +27,9 @@ namespace SimpleSplitter
                 request.Progress = "Checking timed execution: " + candidate.Nodes.Count + " burns, burn " + (i + 1) + "...";
                 try
                 {
+                    if (candidate.IsConverted) nominal = executed;
                     nominal.GetFixedState(node.Ut, out Vector3d r, out Vector3d v);
-                    Orbit after = SplitPlanner.OrbitFromState(r,
+                    Orbit after = candidate.IsConverted ? request.Reference.Target : SplitPlanner.OrbitFromState(r,
                         v + (SplitPlanner.NodeRotation(nominal, node.Ut) * node.DeltaV).xzy, nominal.referenceBody, node.Ut);
                     CelestialBody source = nominal.referenceBody;
                     // Only replays selected finalists. Safety samples don't add
@@ -52,6 +61,11 @@ namespace SimpleSplitter
                 }
                 yield return null;
             }
+            TrajectoryError terminal = request.Reference.Measure(executed);
+            if (!terminal.IsFinite || (candidate.IsConverted &&
+                ((terminal.Position - candidate.TrajectoryError.Position).magnitude > .1 ||
+                 (terminal.Velocity - candidate.TrajectoryError.Velocity).magnitude > .0001)))
+            { completed(false); yield break; }
             completed(true);
         }
 

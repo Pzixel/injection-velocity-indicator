@@ -18,6 +18,7 @@ namespace SimpleSplitter
             int onlyCount = 0, bool redistribute = false, double? refinementBias = null)
         {
             string? error = ValidateRequest(request);
+            request.ValidationError = error ?? string.Empty;
             if (error != null)
             {
                 completed(PlanResult.Failure(error));
@@ -42,7 +43,7 @@ namespace SimpleSplitter
             {
                 if (onlyCount != 0 && totalCount != onlyCount) continue;
                 if (redistribute ? cache.IsRefined(totalCount) : cache.Contains(totalCount)) continue;
-                var candidates = redistribute ? cache.ForCount(totalCount) : new List<SplitCandidate>();
+                var candidates = new List<SplitCandidate>();
                 var testedSchedules = new HashSet<string>();
                 // Explore setup energy as well as stage layouts. No angular-loss
                 // ceiling is used: long burns compete on their simulated error.
@@ -68,6 +69,12 @@ namespace SimpleSplitter
                             body.sphereOfInfluence * (1.0 - SoiMargin), originalOrbit.period,
                             available, setupCeiling, request.Propulsion, double.PositiveInfinity, distributionBias: bias);
                         yield return null;
+                        // Cheap angular-spread proxy protects useful layouts
+                        // from nominal energy-only pruning. It is only a seed
+                        // ordering; the executed terminal state selects winners.
+                        schedules.Sort((a, b) => SetupSpread(a, request.Propulsion,
+                            position.magnitude, velocity.magnitude, tangentFraction).CompareTo(
+                            SetupSpread(b, request.Propulsion, position.magnitude, velocity.magnitude, tangentFraction)));
                         // Bound full simulations per sampled energy while keeping
                         // alternatives in case the stock solver rejects the winner.
                         for (int option = 0; option < Math.Min(3, schedules.Count); option++)
@@ -119,8 +126,41 @@ namespace SimpleSplitter
                     }
                 }
                 candidates.Sort(CompareChoices);
-                if (!redistribute && candidates.Count > 3) candidates.RemoveRange(3, candidates.Count - 3);
-                cache.Store(totalCount, candidates);
+                if (candidates.Count > 3) candidates.RemoveRange(3, candidates.Count - 3);
+                cache.StoreSeeds(totalCount, candidates);
+                var converted = redistribute ? cache.ForCount(totalCount) : new List<SplitCandidate>();
+                var starts = new List<SplitCandidate>(candidates);
+                // A maneuver can occur along the departure, not only on an
+                // earlier bound return orbit. Reserve alternatives that spend
+                // the extra slots converting a lower-count departure arc.
+                for (int prior = totalCount - 1; prior >= 2; prior--)
+                {
+                    List<SplitCandidate> earlier = cache.SeedsForCount(prior);
+                    int take = prior == totalCount - 1 ? 3 : 1;
+                    for (int i = 0; i < Math.Min(take, earlier.Count); i++) starts.Add(earlier[i]);
+                }
+                foreach (SplitCandidate seed in starts)
+                {
+                    int pieces = totalCount - seed.Nodes.Count + 1;
+                    bool finished = false;
+                    var budget = new EvaluationBudget();
+                    while (!finished)
+                    {
+                        budget.BeginSlice();
+                        try
+                        {
+                            FiniteConversionResult? conversion = FiniteConversion.Convert(request, seed, pieces, request.Reference);
+                            if (conversion != null) Collect(converted, FromConversion(request, seed, pieces, conversion));
+                            finished = true;
+                        }
+                        catch (YieldPlanningException) { }
+                        finally { EvaluationBudget.Current = null; }
+                        yield return null;
+                    }
+                }
+                converted.Sort(CompareChoices);
+                if (!redistribute && converted.Count > 3) converted.RemoveRange(3, converted.Count - 3);
+                cache.Store(totalCount, converted);
                 if (redistribute && !refinementBias.HasValue) cache.MarkRefined(totalCount);
                 yield return null;
             }
@@ -132,12 +172,54 @@ namespace SimpleSplitter
 
         internal static int CompareChoices(SplitCandidate a, SplitCandidate b)
         {
-            double Error(SplitCandidate c) => CandidateRules.IsFinite(c.ExcessVelocityError)
-                ? c.ExcessVelocityError : c.ExecutionEstimate.VelocityError;
-            int comparison = Error(a).CompareTo(Error(b));
-            if (comparison != 0) return comparison;
+            if (a.MatchesReference != b.MatchesReference) return a.MatchesReference ? -1 : 1;
+            double Error(SplitCandidate c) => c.TrajectoryError.IsFinite ? c.TrajectoryError.SeparationMeters : double.PositiveInfinity;
+            int comparison = 0;
+            if (!a.MatchesReference)
+            {
+                comparison = Math.Floor(Error(a)).CompareTo(Math.Floor(Error(b)));
+                if (comparison != 0) return comparison;
+            }
             comparison = a.Score.TotalDeltaV.CompareTo(b.Score.TotalDeltaV);
             return comparison != 0 ? comparison : a.Score.CompareTo(b.Score);
+        }
+
+        private static double SetupSpread(KickSchedule schedule, StagedPropulsion propulsion,
+            double radius, double speed, double tangent)
+        {
+            StageCursor fuel = propulsion.Cursor();
+            double cost = 0, spent = 0;
+            foreach (double dv in schedule.DeltaVs)
+            {
+                if (!fuel.IsUsable) return double.PositiveInfinity;
+                double angle = (speed + spent + dv * .5) * tangent / radius * fuel.Engine.Duration(dv);
+                cost += dv * angle * angle / 24;
+                if (!fuel.Consume(dv)) return double.PositiveInfinity;
+                spent += dv;
+            }
+            return cost;
+        }
+
+        private static SplitCandidate FromConversion(SplitRequest request, SplitCandidate seed, int pieces, FiniteConversionResult conversion)
+        {
+            double largest = 0;
+            foreach (NodeSpec n in conversion.Nodes) largest = Math.Max(largest, n.BurnDeltaV);
+            double end = conversion.Nodes[conversion.Nodes.Count - 1].Ut + conversion.Nodes[conversion.Nodes.Count - 1].Duration -
+                conversion.Nodes[conversion.Nodes.Count - 1].StartOffset;
+            conversion.Executed.GetFixedState(end, out Vector3d r, out Vector3d v);
+            request.Reference.Target.GetFixedState(end, out Vector3d targetR, out Vector3d targetV);
+            double mu = request.SourceOrbit.referenceBody.gravParameter;
+            double targetEnergy = -mu / (2 * request.Reference.Target.semiMajorAxis);
+            double gain = targetEnergy + mu / (2 * request.SourceOrbit.semiMajorAxis);
+            double energyLoss = gain > 1 ? Math.Max(0, (targetEnergy + mu / (2 * conversion.Executed.semiMajorAxis)) / gain) : 0;
+            var execution = new FiniteBurnEstimate(conversion.CosineLoss, energyLoss, (r - targetR).magnitude, (v - targetV).magnitude);
+            var departure = new FiniteBurnEstimate(conversion.DepartureCosineLoss, energyLoss, execution.PositionError, execution.VelocityError);
+            double excess = (FiniteBurnEstimate.OutgoingExcess(conversion.Executed, end) -
+                FiniteBurnEstimate.OutgoingExcess(request.Reference.Target, end)).magnitude;
+            return new SplitCandidate(conversion.Nodes, new CandidateScore(largest, conversion.TotalDeltaV, 0,
+                conversion.Nodes[0].Ut, conversion.Nodes.Count), seed.LeadOrbits, seed.SetupDeltaV, conversion.SetupCosineLoss,
+                departure, execution, excess, request.OriginalDeltaV.magnitude, seed.Schedule, seed, pieces,
+                conversion.Error, request.Reference.Epoch);
         }
 
         // Reuse the searched stage layout, distribution and setup ceiling, but
@@ -146,6 +228,29 @@ namespace SimpleSplitter
         internal static IEnumerator RefreshAsync(SplitRequest request, SplitCandidate candidate,
             Action<SplitCandidate?> completed)
         {
+            if (candidate.ConversionSeed != null)
+            {
+                SplitCandidate? seed = null;
+                yield return RefreshAsync(request, candidate.ConversionSeed, value => seed = value);
+                if (seed == null) { completed(null); yield break; }
+                var conversionBudget = new EvaluationBudget();
+                while (true)
+                {
+                    bool done = false;
+                    SplitCandidate? result = null;
+                    conversionBudget.BeginSlice();
+                    try
+                    {
+                        FiniteConversionResult? conversion = FiniteConversion.Convert(request, seed, candidate.DeparturePieces, request.Reference);
+                        if (conversion != null) result = FromConversion(request, seed, candidate.DeparturePieces, conversion);
+                        done = true;
+                    }
+                    catch (YieldPlanningException) { }
+                    finally { EvaluationBudget.Current = null; }
+                    if (done) { completed(result); yield break; }
+                    yield return null;
+                }
+            }
             KickSchedule? recipe = candidate.Schedule;
             if (recipe == null) { completed(candidate); yield break; }
             Orbit source = request.SourceOrbit;
@@ -211,13 +316,10 @@ namespace SimpleSplitter
                 return "The maneuver is too close to the current time to split safely.";
             if (!CandidateRules.IsFinite(request.OriginalDeltaV.magnitude) || request.OriginalDeltaV.z <= ComponentTolerance)
                 return "The maneuver must contain a positive prograde ejection burn.";
-            if (orbit.eccentricity >= 1e-3)
-            {
-                double anomaly = orbit.TrueAnomalyAtUT(request.OriginalUt);
-                double wrapped = Math.Abs(Math.Atan2(Math.Sin(anomaly), Math.Cos(anomaly)));
-                if (wrapped > Math.Max(1e-3, 2.0 * Math.PI / orbit.period))
-                    return "Place the selected maneuver at periapsis before splitting it.";
-            }
+            // Resonance returns to the same state after whole orbital periods,
+            // at any anomaly. Scheduling already uses the node's actual radius,
+            // speed and tangential fraction; finite integration and coast checks
+            // decide whether the resulting burns are executable.
             if ((request.OriginalUt - request.Now - MinimumLeadTime) / orbit.period < 2.0)
                 return "At least two complete parking-orbit periods are required before the node.";
             return null;
@@ -243,7 +345,7 @@ namespace SimpleSplitter
                 if (!propulsion.IsUsable) return null;
                 BurnPhysics engine = propulsion.Engine;
                 NodeSpec node = new NodeSpec(ut, new Vector3d(0.0, 0.0, kick),
-                    engine.Duration(kick), engine.StartOffset(kick), "Periapsis kick (stage " + propulsion.Stage + ")");
+                    engine.Duration(kick), engine.StartOffset(kick), "Setup kick (stage " + propulsion.Stage + ")");
                 Orbit beforeKick = orbit;
                 orbit = OrbitFromState(position, velocity.normalized * (velocity.magnitude + spent + kick), body, ut);
                 if (!IsSafeIntermediateOrbit(orbit)) return null;
@@ -318,9 +420,11 @@ namespace SimpleSplitter
             NodeSpec final = new NodeSpec(request.OriginalUt, finalDeltaV,
                 finalEngine.Duration(finalMagnitude), finalEngine.StartOffset(finalMagnitude), "Departure (stage " + propulsion.Stage + ")");
             Orbit targetOrbit = OrbitFromState(position, targetVelocity, body, request.OriginalUt);
-            if (!FiniteBurnEstimate.TargetDeparture(orbit, targetOrbit, final, finalEngine, 0, executed,
-                out final, out FiniteBurnEstimate execution, out double excessError,
-                propulsion.Remaining)) return null;
+            if (!FiniteBurnEstimate.TargetEnergy(orbit, targetOrbit, final, finalEngine, 0, executed,
+                out final, out Orbit finalExecuted, out FiniteBurnEstimate execution,
+                maximumBurnDeltaV: propulsion.Remaining)) return null;
+            double excessError = (FiniteBurnEstimate.OutgoingExcess(finalExecuted, request.OriginalUt) -
+                FiniteBurnEstimate.OutgoingExcess(targetOrbit, request.OriginalUt)).magnitude;
             double total = fuelSpent + final.BurnDeltaV;
             largest = Math.Max(largest, final.BurnDeltaV);
             if (!CandidateRules.DeltaVIsAllowed(request.OriginalDeltaV.magnitude, total, largest)) return null;
@@ -336,7 +440,8 @@ namespace SimpleSplitter
             return new SplitCandidate(nodes,
                 new CandidateScore(largest, total, 0.0, firstUt, nodes.Count,
                     request.OriginalDeltaV.magnitude * RankingBand), schedule.LeadOrbits,
-                schedule.SetupDeltaV, maxSetupLoss, departure, execution, excessError, request.OriginalDeltaV.magnitude, schedule);
+                schedule.SetupDeltaV, maxSetupLoss, departure, execution, excessError, request.OriginalDeltaV.magnitude, schedule,
+                trajectoryError: request.Reference.Measure(finalExecuted), boundaryEpoch: request.Reference.Epoch);
         }
 
         internal static Orbit OrbitFromState(Vector3d position, Vector3d velocity, CelestialBody body, double ut)
@@ -376,6 +481,8 @@ namespace SimpleSplitter
                 bool equal = true;
                 for (int i = 0; i < prior.Nodes.Count; i++)
                     if (Math.Abs(prior.Nodes[i].Ut - candidate.Nodes[i].Ut) > 0.01 ||
+                        Math.Abs(prior.Nodes[i].StartOffset - candidate.Nodes[i].StartOffset) > .001 ||
+                        Math.Abs(prior.Nodes[i].Duration - candidate.Nodes[i].Duration) > .001 ||
                         (prior.Nodes[i].DeltaV - candidate.Nodes[i].DeltaV).magnitude > 0.001) { equal = false; break; }
                 if (equal) return;
             }

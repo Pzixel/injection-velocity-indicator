@@ -19,10 +19,10 @@ namespace SimpleSplitter
             var pending = new List<int>();
             for (int count = 2; count <= request.MaximumBurns; count++)
             {
-                bool found = false, rejected = false;
-                yield return Check(count, (safe, hadRejection) => { found = safe; rejected = hadRejection; });
+                bool found = false;
+                yield return Check(count, safe => found = safe);
                 if (!contextMatches()) yield break;
-                if ((!found || rejected) && !request.Cache.IsRefined(count)) pending.Add(count);
+                if (!found && !request.Cache.IsRefined(count)) pending.Add(count);
             }
             // Let the strongest near-solutions repair their coast first. A
             // low-count path with large error cannot monopolize the budget.
@@ -45,7 +45,7 @@ namespace SimpleSplitter
                         refinementBias: Biases[step]);
                     request.Cache.AdvanceRefinement(count);
                     bool found = false;
-                    yield return Check(count, (safe, _) => found = safe);
+                    yield return Check(count, safe => found = safe);
                     if (found)
                     { request.Cache.MarkRefined(count); pending.RemoveAt(index); }
                     else index++;
@@ -55,27 +55,31 @@ namespace SimpleSplitter
             double BestError(int count)
             {
                 List<SplitCandidate> options = request.Cache.ForCount(count);
-                return options.Count == 0 ? double.PositiveInfinity : options[0].ExcessVelocityError;
+                return options.Count == 0 ? double.PositiveInfinity : options[0].TrajectoryError.SeparationMeters;
             }
 
-            IEnumerator Check(int count, Action<bool, bool> completed)
+            IEnumerator Check(int count, Action<bool> completed)
             {
-                bool rejected = false;
+                SplitCandidate? best = null;
                 foreach (SplitCandidate candidate in request.Cache.ForCount(count))
                 {
-                    if (!contextMatches()) { completed(false, rejected); yield break; }
+                    if (!contextMatches()) { completed(false); yield break; }
                     if (!request.Cache.StockSafety.TryGetValue(candidate, out bool safe))
                     {
                         yield return validate(candidate, value => safe = value);
-                        if (!contextMatches()) { completed(false, rejected); yield break; }
+                        if (!contextMatches()) { completed(false); yield break; }
                         request.Cache.StockSafety[candidate] = safe;
                     }
                     if (safe)
-                    { accept(count, candidate.LiveCandidate ?? candidate); completed(true, rejected); yield break; }
-                    rejected = true;
+                    {
+                        SplitCandidate live = candidate.LiveCandidate ?? candidate;
+                        if (best == null || SplitPlanner.CompareChoices(live, best) < 0) best = live;
+                    }
                     yield return null;
                 }
-                completed(false, rejected);
+                if (!contextMatches()) { completed(false); yield break; }
+                if (best != null) accept(count, best);
+                completed(best != null);
             }
         }
     }

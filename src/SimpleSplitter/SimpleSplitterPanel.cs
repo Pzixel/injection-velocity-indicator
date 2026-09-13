@@ -38,8 +38,9 @@ namespace SimpleSplitter
             }
             // GUI.Window keeps these dimensions. Automatic GUILayout resizing
             // previously fought the height reset during scroll/layout/repaint.
-            panelRect.width = Math.Min(panelCollapsed ? 220f : choiceRequest != null && displayedPlan == null ? 760f : 500f, Screen.width);
-            panelRect.height = Math.Min(panelCollapsed ? 28f : displayedPlan != null ? 450f : choiceRequest != null ? 252f + (maximumBurns - 1) * 30f : 180f, Screen.height);
+            bool showChoices = choiceRequest != null && string.IsNullOrEmpty(choiceRequest.ValidationError);
+            panelRect.width = Math.Min(panelCollapsed ? 220f : showChoices && displayedPlan == null ? 760f : 500f, Screen.width);
+            panelRect.height = Math.Min(panelCollapsed ? 28f : displayedPlan != null ? 450f : showChoices ? 252f + (maximumBurns - 1) * 30f : 180f, Screen.height);
             if (!panelPositioned)
             {
                 panelRect.x = (Screen.width - panelRect.width) * 0.5f;
@@ -115,7 +116,7 @@ namespace SimpleSplitter
                     : "One departure node with an encounter. Stages are used automatically.";
                 if (choiceRequest == null && !string.IsNullOrEmpty(GUI.tooltip)) status = GUI.tooltip;
                 GUI.Label(new Rect(12, 104, width, 44), status, wrappedLabel);
-                if (choiceRequest != null) DrawChoices(width);
+                if (choiceRequest != null && string.IsNullOrEmpty(choiceRequest.ValidationError)) DrawChoices(width);
             }
             else
             {
@@ -126,7 +127,7 @@ namespace SimpleSplitter
                 Rect viewport = new Rect(12, 198, width, Math.Max(28, panelRect.height - 278));
                 DrawBurns(displayedPlan, viewport);
                 GUI.Label(new Rect(12, panelRect.height - 70, width, 44),
-                    "Full throttle, hold maneuver direction, and use these timers. Recheck the trajectory after each burn.", wrappedLabel);
+                    "Align to the next node at ignition, then lock attitude and burn at full throttle for the timer. Remove that node afterward. Map preview is approximate.", wrappedLabel);
                 if (!string.IsNullOrEmpty(GUI.tooltip))
                     GUI.Label(new Rect(12, panelRect.height - 26, width, 22), GUI.tooltip);
             }
@@ -158,6 +159,6 @@ namespace SimpleSplitter
         }
 
         private static string BurnLabel(NodeSpec node) => node.Purpose
-            .Replace("Periapsis kick", "Kick").Replace("Plane change", "Plane").Replace("stage ", "S");
+            .Replace("Periapsis kick", "Kick").Replace("Setup kick", "Kick").Replace("Plane change", "Plane").Replace("stage ", "S");
     }
 }

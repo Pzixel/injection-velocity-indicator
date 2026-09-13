@@ -2,19 +2,21 @@
 
 Simple Splitter is a separately packaged KSP 1.12.5 mod for turning one long
 ejection maneuver into earlier periapsis kicks, an optional plane change, and
-a final departure burn. It estimates finite burn durations and energy loss
+a finite departure, which can itself use several burns. It optimizes real burn timing and direction
 for low-thrust and heavily loaded vessels.
 
 ## Use
 
-1. Create an ejection maneuver at periapsis that produces a target-body
-   encounter.
+1. Create an ejection maneuver that produces a target-body encounter.
+   Periapsis is usually efficient, but the maneuver need not be exactly there.
+   Setup kicks return to its orbital position on earlier revolutions; each
+   resulting timed burn and coast must still pass safety checks.
 2. Make sure it is the vessel's only maneuver node and that at least two
    parking-orbit periods remain before it.
 3. Open map view and click the **SS** button in the stock app toolbar to open
    Simple Splitter.
 4. Adjust the **Max burns** slider (default **5**, range 2–10, whole-number steps). This includes
-   every setup kick, plane change, and the final departure. Propulsion follows
+   every setup kick, plane change, and departure part. Propulsion follows
    the vessel's stage order automatically; there is no engine selector.
 5. Click **Compare plans**. The original maneuver is restored between checks.
 6. Review the comparison table and click **Apply** on the preferred row.
@@ -37,9 +39,11 @@ The former "Cosine" column measured the maximum `1 − cos(angle)` between a
 burn's nominal node position and the vessel's position during execution. It
 is a peak geometric diagnostic, not an integrated Δv loss or encounter error.
 It remains available in the longest-burn tooltip, explicitly labeled, and is
-never a filter. Burnout position and outgoing velocity mismatch remain solver
-diagnostics in the logs rather than table columns. Within a count, lower
-outgoing velocity mismatch ranks first, followed by lower total Δv.
+never a filter. Hover over arrival shift for the predicted departure position
+and velocity error, measured at the same time on the original trajectory.
+Within a count, plans matching within 1 m and 0.001 m/s rank by total Δv.
+Otherwise, the smallest combined position/velocity error ranks first. These
+are numerical matching tolerances, not a guarantee of player execution accuracy.
 
 The toolbox starts closed and opens only when requested through its toolbar
 button. Selecting or deselecting a maneuver does not change whether it is open.
@@ -81,9 +85,14 @@ a stage. Contiguous intervals with the same effective engine are merged, so
 draining another tank does not require another maneuver.
 Each burn stays within one propulsion segment. For each total count, the planner
 searches stage allocations and samples setup-energy ceilings. It solves the
-resonant timing for each layout and fully simulates up to three layouts per
-sample. It initially retains three distinct finalists per count. If a preferred
-path is unsafe, it retries with different setup energies and redistributes
+resonant timing for each layout. A cheap Δv-weighted angular-spread estimate
+orders up to three layouts per sample for full simulation. It then converts
+departures from the current and lower-count seeds, spending spare node slots
+on finite burns along the outgoing orbit. Ignition time, each burn's Δv and
+fixed direction, and the intervening coast durations can change. Coasts leave
+at least 30 seconds to reorient; each burn stays in one propulsion segment.
+It initially retains three distinct converted finalists per count. If every
+finalist is unsafe, it retries with different setup energies and redistributes
 delta-v within each stage, solving resonance timing again. The retry retains
 all its simulated alternatives for safety checks. This bounded search
 reports the best safe plan found; it does not prove global optimality or that
@@ -93,8 +102,10 @@ Initial options for all counts are checked before redistribution retries.
 Refinement shares a two-second allowance, checked between batches, so a
 difficult low-count row cannot hold up the whole table. When the status says
 refinement paused, **Compare plans** resumes unfinished batches while the
-inputs still match. Every exposed row has completed both timed execution and
-stock trajectory checks; exhausting the allowance never bypasses safety.
+inputs still match. Every exposed row has completed timed execution, actual
+patched-conic coast checks and command-node retention checks; exhausting the
+allowance never bypasses safety. All checked finalists are ranked using their
+refreshed finite execution, rather than accepting the first safe stale score.
 
 Shares are balanced within a propulsion segment. A new count is optimized
 independently: three same-stage kicks may all be redistributed, rather than
@@ -124,11 +135,11 @@ at most 16 new integrations per slice. **Cancel calculation** remains available.
 There is no global timeout that prevents later counts from being searched.
 Individual integrations and stock solver calls still run on KSP's main thread.
 
-For nominal safety, each candidate is checked with every later-node suffix
-absent so KSP solves the full coast after each intermediate burn. Only events
-before the next burn invalidate that coast. The original node is restored in
-`finally` before every yield, including failed previews. This uses solved patch
-transitions instead of relying on the map's collision marker.
+Converted nodes encode the intended finite command relative to the predicted
+actual orbit before that burn. The instantaneous stock map preview is therefore
+an approximation, and can show a different encounter. Safety follows the actual
+integrated burns and coasts. Command creation is checked separately; the original
+node is restored in `finally` before yielding from temporary previews.
 
 The finite simulator rejects sampled surface/atmosphere crossings throughout
 thrust. Finalists also sample moon SOIs during each burn and use independent
@@ -140,34 +151,40 @@ stock solver precision still limit these predictions.
 
 Extra delta-v and the largest burn are comparison properties, with no hidden
 percentage cap. Each burn must still fit the fuel available in its propulsion
-segment. Both the nominal stock flight plan and the simulated timed departure
-must encounter the same body within one day of the original arrival, using
+segment. The simulated timed departure must encounter the original body within
+one day of the original arrival, using
 KSP's displayed calendar. A timed path that never reaches the target is rejected.
-The nominal departure state and UT are preserved during construction;
-KSP's encounter check is repeated after constructing the nodes.
-Rejected stock encounters are rolled back before trying the next candidate.
+The original maneuver defines an immutable reference trajectory. Every candidate
+targets its position and velocity at a common time after thrust, inside the
+departure body's SOI. Burn positions and times can move while that reference
+remains fixed. See [the objective investigation](docs/finite-burn-objective.md)
+for the equations, comparison experiments, and relationship to the NASA paper.
 
 ## Executing the timed burns
 
 The compact burn table shows the burn/stage, timed delta-v, and duration.
 The header compares the original maneuver delta-v with the total timed split
 delta-v. Hover over a burn for its absolute start UT and stock node delta-v. **Use the displayed full-throttle burn
-duration while holding the maneuver direction.** Stopping at the stock node's
-zero remaining delta-v does not apply the energy compensation. The model
-holds a fixed inertial maneuver direction throughout each burn.
+duration while holding a fixed attitude.** After completing and removing each
+node, coast to the next burn. Align to that next remaining node immediately
+before ignition and lock the attitude throughout the burn. Do not continuously
+track the changing remaining-maneuver marker or stop at zero remaining Δv;
+use the supplied start time and duration. The model holds a fixed inertial
+direction within each burn and can use a different direction for the next one.
 
 The timers are numerically adjusted to recover the intended orbital energy
-and period. This matters particularly near escape, where a small energy error
-can cause a large return-time error. The departure window is also searched to
-reduce outgoing excess-velocity error within the available stage fuel; its time
-offset can differ substantially from half the burn duration.
+and period for the setup seed. This matters particularly near escape, where a
+small energy error can cause a large return-time error. A bounded shooting
+solver then matches the entire executed departure to the original full state,
+and reduces Δv while retaining that match. The offsets can differ from half
+the burn duration because thrust acceleration increases as fuel is consumed.
 
 The model propagates the full sequence of finite burns and intervening coasts.
-The KSP log records residual burnout position/velocity error. **This is not an exact finite-burn
-encounter guarantee.** Period/energy compensation does not remove every
-direction, orbit-shape, or timing error. A long final departure can still need
-a course correction even when the nominal stock encounter is correct. Recheck
-the remaining flight plan after executing each kick.
+The KSP log records residual burnout and common-epoch position/velocity error.
+Small burn counts may have insufficient freedom to meet the matching tolerance;
+their best available approximation can still be offered if the real path passes
+the encounter checks. Numerical integration, propulsion estimates and player
+execution limit accuracy. Recheck the trajectory after each burn.
 
 Estimates assume constant full vacuum thrust at the configured limiter and
 constant Isp within each propulsion segment. Follow the displayed stage order;

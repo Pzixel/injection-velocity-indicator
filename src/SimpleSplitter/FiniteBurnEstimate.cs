@@ -44,10 +44,10 @@ namespace SimpleSplitter
             Func<Vector3d, double, bool>? positionIsSafe = null)
         {
             executedAfter = executedBefore;
-            before.GetFixedState(node.Ut, out Vector3d center, out Vector3d velocity);
+            (node.InertialDirection.HasValue ? executedBefore : before).GetFixedState(node.Ut, out Vector3d center, out Vector3d velocity);
             double startUt = node.Ut - node.StartOffset;
             executedBefore.GetFixedState(startUt, out Vector3d r, out Vector3d v);
-            Vector3d direction = (SplitPlanner.NodeRotation(before, node.Ut) * node.DeltaV).xzy.normalized;
+            Vector3d direction = node.InertialDirection ?? (SplitPlanner.NodeRotation(before, node.Ut) * node.DeltaV).xzy.normalized;
             double mu = before.referenceBody.gravParameter;
             double safeRadius = before.referenceBody.Radius +
                 (before.referenceBody.atmosphere ? before.referenceBody.atmosphereDepth : 0.0);
@@ -139,7 +139,7 @@ namespace SimpleSplitter
                 if (!estimate.IsFinite) return false;
                 double actualEnergy = -mu / (2.0 * executedAfter.semiMajorAxis);
                 double error = targetEnergy - actualEnergy;
-                if (Math.Abs(error) < 0.001) return true;
+                if (Math.Abs(error) < .001) return true;
                 executedAfter.GetFixedState(timed.Ut + timed.Duration - timed.StartOffset,
                     out _, out Vector3d velocity);
                 Vector3d direction = (SplitPlanner.NodeRotation(before, nominal.Ut) * nominal.DeltaV).xzy.normalized;
@@ -168,62 +168,6 @@ namespace SimpleSplitter
             double dt = executedBefore.GetDTforTrueAnomalyAtUT(anomaly, nominal.Ut);
             return TargetEnergy(before, target, nominal, engine, spent, executedBefore,
                 out timed, out executedAfter, out estimate, -dt, executedBefore.period * 0.25, maximumBurnDeltaV);
-        }
-
-        // Energy determines excess speed; moving the burn window adjusts the
-        // outgoing in-plane direction. This corrects the dominant finite-burn
-        // ejection error without asking the pilot to steer away from the node.
-        internal static bool TargetDeparture(Orbit before, Orbit target, NodeSpec nominal,
-            BurnPhysics engine, double spent, Orbit executedBefore, out NodeSpec timed,
-            out FiniteBurnEstimate estimate, out double excessError, double maximumBurnDeltaV)
-        {
-            excessError = double.NaN;
-            if (!TargetEnergy(before, target, nominal, engine, spent, executedBefore,
-                out timed, out _, out estimate, maximumBurnDeltaV: maximumBurnDeltaV)) return false;
-            if (target.eccentricity <= 1.0) return timed.BurnDeltaV <= maximumBurnDeltaV;
-            Vector3d desired = OutgoingExcess(target, nominal.Ut);
-            double bestError = double.PositiveInfinity;
-            double bestShift = 0.0;
-            NodeSpec bestNode = timed;
-            FiniteBurnEstimate bestEstimate = estimate;
-            double spacing = timed.Duration / 4.0;
-            // Bracket a feasible minimum before refinement. An unconstrained
-            // Newton step can jump into an unaffordable very early burn.
-            for (int sample = -3; sample <= 3; sample++)
-            {
-                double shift = sample * spacing;
-                double error = DepartureTrial(before, target, nominal, engine, spent, executedBefore,
-                    desired, maximumBurnDeltaV, shift, out NodeSpec trial, out FiniteBurnEstimate trialEstimate);
-                if (error < bestError)
-                { bestError = error; bestShift = shift; bestNode = trial; bestEstimate = trialEstimate; }
-            }
-            double low = bestShift - spacing, high = bestShift + spacing;
-            for (int i = 0; i < 12; i++)
-            {
-                double left = low + (high - low) / 3.0;
-                double right = high - (high - low) / 3.0;
-                double leftError = DepartureTrial(before, target, nominal, engine, spent, executedBefore,
-                    desired, maximumBurnDeltaV, left, out NodeSpec leftNode, out FiniteBurnEstimate leftEstimate);
-                double rightError = DepartureTrial(before, target, nominal, engine, spent, executedBefore,
-                    desired, maximumBurnDeltaV, right, out NodeSpec rightNode, out FiniteBurnEstimate rightEstimate);
-                if (leftError < bestError) { bestError = leftError; bestNode = leftNode; bestEstimate = leftEstimate; }
-                if (rightError < bestError) { bestError = rightError; bestNode = rightNode; bestEstimate = rightEstimate; }
-                if (leftError < rightError) high = right; else low = left;
-            }
-            timed = bestNode;
-            estimate = bestEstimate;
-            excessError = bestError;
-            return CandidateRules.IsFinite(bestError);
-        }
-
-        private static double DepartureTrial(Orbit before, Orbit target, NodeSpec nominal, BurnPhysics engine,
-            double spent, Orbit executedBefore, Vector3d desired, double maximumBurnDeltaV, double shift,
-            out NodeSpec node, out FiniteBurnEstimate estimate)
-        {
-            if (!TargetEnergy(before, target, nominal, engine, spent, executedBefore,
-                out node, out Orbit executed, out estimate, shift, maximumBurnDeltaV: maximumBurnDeltaV) || node.BurnDeltaV > maximumBurnDeltaV)
-                return double.PositiveInfinity;
-            return (OutgoingExcess(executed, node.Ut + node.Duration - node.StartOffset) - desired).magnitude;
         }
 
         internal static Vector3d OutgoingExcess(Orbit orbit, double ut)

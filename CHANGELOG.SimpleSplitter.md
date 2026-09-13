@@ -2,6 +2,21 @@
 
 ## 1.2.3
 
+- Convert candidate departures into finite, fixed-direction burns by matching
+  position and velocity to the original trajectory at one common epoch. Rank
+  matched plans by total Δv; minimize full-state error when no match is found.
+  Allow multiple burns and independently adjusted coasts along the departure,
+  within the player's node limit. Use angular spread only to order seed layouts.
+- Re-run conversion on live refresh and rank all checked finalists using their
+  refreshed metrics. Validate the actual timed path and retained command nodes;
+  the instantaneous map preview no longer vetoes a valid finite conversion.
+- Add the logged two-stage regression, independent fine-step command replay,
+  phase-error and velocity-error counterexamples, and a reproducible comparison
+  of full-state, trajectory-RMS and correction-effort objectives.
+- Allow setup kicks at the original maneuver's orbital position on eccentric
+  parking orbits. Remove the blanket periapsis-only rejection while retaining
+  finite-burn, atmosphere, stage-fuel and encounter validation. Show request
+  validation errors directly instead of replacing them with an empty table.
 - Replace unclear comparison diagnostics with added Δv in m/s and percent,
   longest burn duration, and actual simulated arrival early/late at the target.
   Label units and explain the geometric cosine diagnostic in a tooltip instead
@@ -12,7 +27,7 @@
   refinement allowance across counts, prioritize near-solutions, and retain
   unfinished batches for subsequent comparisons.
 - Reject failed timed paths before constructing stock preview nodes. All
-  accepted options still pass every stock prefix and timed safety check.
+  accepted options pass actual coast, burn, fuel and target-encounter checks.
 - Keep comparison results through harmless coasting drift; refresh the live
   orbit for safety and recheck propulsion before exposing or applying results.
 - Distinguish engine propellants from other supplies in snapshot validation.

@@ -8,6 +8,8 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Include="..\..\src\SimpleSplitter\TrajectoryReference.cs" Link="TrajectoryReference.cs" />
+    <Compile Include="..\..\src\SimpleSplitter\FiniteConversion.cs" Link="FiniteConversion.cs" />
     <Compile Include="..\..\src\SimpleSplitter\PlanningWork.cs" Link="PlanningWork.cs" />
     <Compile Include="..\..\src\SimpleSplitter\SafePlanSearch.cs" Link="SafePlanSearch.cs" />
     <Compile Include="..\..\src\SimpleSplitter\OrbitState.cs" Link="OrbitState.cs" />

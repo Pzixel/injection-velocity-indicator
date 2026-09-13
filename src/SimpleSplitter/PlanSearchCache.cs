@@ -9,6 +9,7 @@ namespace SimpleSplitter
     {
         private SplitRequest? context;
         private readonly Dictionary<int, List<SplitCandidate>> counts = new Dictionary<int, List<SplitCandidate>>();
+        private readonly Dictionary<int, List<SplitCandidate>> seeds = new Dictionary<int, List<SplitCandidate>>();
         private readonly HashSet<int> refined = new HashSet<int>();
         private readonly Dictionary<int, int> refinementSteps = new Dictionary<int, int>();
         internal bool RefinementBudgetReached { get; set; }
@@ -25,6 +26,7 @@ namespace SimpleSplitter
             if (context == null || !Matches(context, request))
             {
                 counts.Clear();
+                seeds.Clear();
                 refined.Clear();
                 refinementSteps.Clear();
                 StockSafety.Clear();
@@ -38,6 +40,7 @@ namespace SimpleSplitter
             {
                 foreach (var candidate in counts[count]) StockSafety.Remove(candidate);
                 counts.Remove(count);
+                seeds.Remove(count);
                 refined.Remove(count);
                 refinementSteps.Remove(count);
             }
@@ -53,6 +56,9 @@ namespace SimpleSplitter
             ? new List<SplitCandidate>(result) : new List<SplitCandidate>();
 
         internal bool Contains(int count) => counts.ContainsKey(count);
+        internal List<SplitCandidate> SeedsForCount(int count) => seeds.TryGetValue(count, out List<SplitCandidate>? result)
+            ? new List<SplitCandidate>(result) : new List<SplitCandidate>();
+        internal void StoreSeeds(int count, List<SplitCandidate> candidates) => seeds[count] = candidates;
         internal void Store(int count, List<SplitCandidate> candidates) => counts[count] = candidates;
         internal List<SplitCandidate> GetCandidates(int maximum)
         {

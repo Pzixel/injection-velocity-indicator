@@ -6,11 +6,15 @@ namespace SimpleSplitter
     {
         private static int failures;
 
-        private static int Main()
+        private static int Main(string[] args)
         {
+            if (Array.IndexOf(args, "--conversion-study") >= 0) return FiniteConversionStudy.Run();
+            if (Array.IndexOf(args, "--conversion-smoke") >= 0) return FiniteConversionStudy.ConversionSmoke();
             PlanningWorkTests();
             IntegrationRegression();
+            FiniteConversionRegression();
             TestburnRegression();
+            LatestSaveRegression();
             PanelPointerTests();
             ArrivalWindowTests();
             DeltaVPolicyTests();
@@ -221,7 +225,7 @@ namespace SimpleSplitter
                     True(SplitPlanner.CompareChoices(previous!, candidate) <= 0, "best departure error retained first within count");
                 previousCount = candidate.Nodes.Count;
                 previous = candidate;
-                ValidateTimedPlan(source, propulsion, candidate, node.DeltaV);
+                ValidateTimedPlan(source, propulsion, candidate, node.DeltaV, node.UT);
                 Console.WriteLine(candidate.Nodes.Count + " burns: extra dv=" + candidate.AdditionalDeltaV.ToString("F1") +
                     ", departure error=" + candidate.ExcessVelocityError.ToString("F2") + ", cosine=" + candidate.MaximumCosineLoss.ToString("P1"));
             }
@@ -267,7 +271,7 @@ namespace SimpleSplitter
             PlanResult antinormal = RunPlan(new SplitRequest(antiNode, body, node.UT + 1e7, 1000, fast, 4))!;
             True(antinormal.Candidates.Exists(c => c.Nodes.Exists(n => n.Purpose.StartsWith("Plane change"))),
                 "antinormal high-thrust alternatives remain available");
-            foreach (SplitCandidate candidate in antinormal.Candidates) ValidateTimedPlan(source, fast, candidate, antiNode.DeltaV);
+            foreach (SplitCandidate candidate in antinormal.Candidates) ValidateTimedPlan(source, fast, candidate, antiNode.DeltaV, antiNode.UT);
             var moon = new CelestialBody { gravParameter = 6.5138398e10, Radius = 200000, sphereOfInfluence = 2429559 };
             Orbit lunar = SplitPlanner.OrbitFromState(new Vector3d(300000, 0, 0),
                 new Vector3d(0, Math.Sqrt(moon.gravParameter / 300000), 0), moon, 1000);
@@ -309,33 +313,42 @@ namespace SimpleSplitter
             True(samples == 3, "SOI callback is evaluated throughout the burn");
         }
 
-        private static void ValidateTimedPlan(Orbit source, StagedPropulsion propulsion, SplitCandidate candidate, Vector3d originalDeltaV)
+        private static void ValidateTimedPlan(Orbit source, StagedPropulsion propulsion, SplitCandidate candidate, Vector3d originalDeltaV, double originalUt)
         {
-            Orbit nominal = source, executed = source;
+            source.GetFixedState(originalUt, out Vector3d referenceR, out Vector3d referenceV);
+            Orbit target = SplitPlanner.OrbitFromState(referenceR,
+                referenceV + (SplitPlanner.NodeRotation(source, originalUt) * originalDeltaV).xzy, source.referenceBody, originalUt);
+            Orbit executed = source;
             StageCursor cursor = propulsion.Cursor();
             double spent = 0, loss = 0;
+            double previousEnd = double.NegativeInfinity;
             foreach (NodeSpec node in candidate.Nodes)
             {
-                nominal.GetFixedState(node.Ut, out Vector3d r, out Vector3d v);
-                Orbit after = SplitPlanner.OrbitFromState(r,
-                    v + (SplitPlanner.NodeRotation(nominal, node.Ut) * node.DeltaV).xzy, source.referenceBody, node.Ut);
-                FiniteBurnEstimate estimate = FiniteBurnEstimate.Measure(nominal, after, node, cursor.Engine, 0, executed, out executed);
+                double start = node.Ut - node.StartOffset;
+                True(start >= previousEnd + FiniteConversion.CoastSeconds - 1e-5, "finite burns leave time to coast and reorient");
+                if (CandidateRules.IsFinite(previousEnd))
+                    True(StockTrajectorySafety.AboveAtmosphere(executed, previousEnd, start), "actual intermediate coast stays above atmosphere");
+                Vector3d command = (SplitPlanner.NodeRotation(executed, node.Ut) * node.DeltaV).xzy;
+                Nearly(0, (command.normalized - node.InertialDirection!.Value).magnitude, 1e-7,
+                    "sequential stock command encodes the prescribed real inertial direction");
+                Nearly(node.BurnDeltaV, command.magnitude, 1e-6, "stock command encodes actual expenditure");
+                Nearly(cursor.Engine.Duration(node.BurnDeltaV), node.Duration, 1e-7, "timer follows actual stage mass flow");
+                FiniteBurnEstimate estimate = FiniteBurnEstimate.Measure(executed, target, node, cursor.Engine, 0, executed, out executed);
                 True(estimate.IsFinite, "every retained option has safe finite execution");
-                Nearly(-source.referenceBody.gravParameter / (2 * after.semiMajorAxis),
-                    -source.referenceBody.gravParameter / (2 * executed.semiMajorAxis), .005, "energy compensation retained");
                 True(cursor.Consume(node.BurnDeltaV), "finite execution respects stage boundaries");
                 loss = Math.Max(loss, estimate.CosineLoss);
                 spent += node.BurnDeltaV;
-                nominal = after;
+                previousEnd = start + node.Duration;
             }
             Nearly(spent - candidate.OriginalDeltaV, candidate.AdditionalDeltaV, 1e-6, "additional dv includes every timed burn");
             Nearly(loss, candidate.MaximumCosineLoss, 1e-7, "reported cosine includes departure and every prior burn");
-            double departureUt = candidate.Nodes[candidate.Nodes.Count - 1].Ut;
-            source.GetFixedState(departureUt, out Vector3d expectedR, out Vector3d sourceV);
-            nominal.GetFixedState(departureUt, out Vector3d actualR, out Vector3d actualV);
-            Vector3d targetV = sourceV + (SplitPlanner.NodeRotation(source, departureUt) * originalDeltaV).xzy;
-            Nearly(0, (actualR - expectedR).magnitude, 1, "nominal departure position is preserved");
-            Nearly(0, (actualV - targetV).magnitude, .01, "nominal departure velocity is preserved");
+            True(previousEnd < candidate.BoundaryEpoch, "terminal match occurs after all thrust ends");
+            target.GetFixedState(candidate.BoundaryEpoch, out Vector3d targetR, out Vector3d targetV);
+            executed.GetFixedState(candidate.BoundaryEpoch, out Vector3d actualR, out Vector3d actualV);
+            Nearly((actualR - targetR).magnitude, candidate.TrajectoryError.PositionMeters, .1,
+                "reported position error uses actual execution and immutable original maneuver");
+            Nearly((actualV - targetV).magnitude, candidate.TrajectoryError.VelocityMetersPerSecond, 1e-5,
+                "reported velocity error uses the same reference epoch");
         }
 
         private static void StagedPropulsionTests()

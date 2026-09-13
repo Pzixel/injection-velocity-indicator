@@ -68,7 +68,7 @@ namespace SimpleSplitter
                     // four-node path and admit a redistributed finite alternative.
                     // Real moon encounters are still checked in the game.
                     completed(candidate.Nodes.Count == 5 || (candidate.Nodes.Count == 4 &&
-                        Math.Abs(candidate.Nodes[0].DeltaV.z - candidate.Nodes[1].DeltaV.z) > 1));
+                        candidate.Schedule!.DistributionBias != 0));
                     yield break;
                 }
                 void Drain(IEnumerator iterator)
@@ -81,7 +81,7 @@ namespace SimpleSplitter
                 True(request.Cache.IsRefined(4), "four-burn redistribution is cached");
                 False(request.Cache.IsRefined(5), "already safe counts do not need a collision retry");
                 if (accepted.TryGetValue(4, out SplitCandidate? redistributed))
-                    ValidateTimedPlan(source, propulsion, redistributed, node.DeltaV);
+                    ValidateTimedPlan(source, propulsion, redistributed, node.DeltaV, node.UT);
                 int priorChecks = checks;
                 Drain(SafePlanSearch.FindAsync(request, Check, () => true, (count, candidate) => accepted[count] = candidate));
                 True(checks == priorChecks, "comparison reuses safety results and completed redistribution");
@@ -114,11 +114,11 @@ namespace SimpleSplitter
                     "a cached four-burn recipe refreshes against live orbital roundoff");
                 if (liveCandidate != null)
                 {
-                    ValidateTimedPlan(noisy, propulsion, liveCandidate, node.DeltaV);
+                    ValidateTimedPlan(noisy, propulsion, liveCandidate, node.DeltaV, node.UT);
                     Nearly(cachedRecipe.Schedule!.DistributionBias, liveCandidate.Schedule!.DistributionBias, 0,
                         "live refresh preserves the optimized redistribution");
-                    True(liveCandidate.Nodes.Exists(n => n.Purpose.StartsWith("Plane change")),
-                        "live refresh retains the plane-change slot");
+                    True(liveCandidate.DeparturePieces == cachedRecipe.DeparturePieces,
+                        "live refresh retains the finite departure allocation");
                 }
                 identityCache.Prepare(new SplitRequest(noisyNode, body, request.ArrivalUt + 2 * CandidateRules.ArrivalToleranceSeconds, now + 1,
                     propulsion, 5, identityCache));
@@ -149,10 +149,10 @@ namespace SimpleSplitter
                         yield return SplitPlanner.RefreshAsync(benchmark, candidate, value => refreshed = value);
                         liveReplays++;
                         bool safe = refreshed != null && refreshed.Nodes.Count >= 4 &&
-                            Math.Abs(refreshed.Nodes[0].DeltaV.z - refreshed.Nodes[1].DeltaV.z) > 1;
+                            refreshed.Schedule!.DistributionBias != 0;
                         if (safe)
                         {
-                            ValidateTimedPlan(source, propulsion, refreshed!, node.DeltaV);
+                            ValidateTimedPlan(source, propulsion, refreshed!, node.DeltaV, node.UT);
                             candidate.LiveCandidate = refreshed;
                         }
                         completed(safe);
@@ -165,8 +165,8 @@ namespace SimpleSplitter
                         True(rows.ContainsKey(count), "cold search redistributes and fully replays count " + count);
                         True(benchmark.Cache.RefinementStep(count) == 1,
                             "a usable higher-count row does not wait for exhaustive low-count retries");
-                        True(rows[count].Nodes.Exists(n => n.Purpose.StartsWith("Plane change")),
-                            "each timed performance fixture preserves its plane-change burn");
+                        True(rows[count].IsConverted,
+                            "each timed performance fixture executes the finite conversion");
                     }
                     False(rows.ContainsKey(3), "an exhausted unsafe count never becomes an accepted row");
                     True(benchmark.Cache.IsRefined(3) && benchmark.Cache.RefinementStep(3) == 7,
@@ -178,7 +178,7 @@ namespace SimpleSplitter
                 Console.WriteLine("testburn redistributed four-burn alternatives=" + request.Cache.ForCount(4).Count);
                 foreach (SplitCandidate candidate in result.Candidates)
                 {
-                    ValidateTimedPlan(source, propulsion, candidate, node.DeltaV);
+                    ValidateTimedPlan(source, propulsion, candidate, node.DeltaV, node.UT);
                     True(candidate.Nodes.TrueForAll(n => n.Purpose.Contains("stage 11")),
                         "testburn uses the active nuclear stage throughout");
                     Console.WriteLine("testburn " + candidate.Nodes.Count + " burns: timed dv=" +

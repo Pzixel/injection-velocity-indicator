@@ -241,6 +241,13 @@ namespace SimpleSplitter
                 Post("The split calculation did not complete.");
                 yield break;
             }
+            if (!string.IsNullOrEmpty(request.ValidationError))
+            {
+                planningCoroutine = null;
+                request.Progress = request.ValidationError;
+                Post(request.Progress);
+                yield break;
+            }
             request.Progress = "Checking staged fuel estimate...";
             UnityEngine.Debug.Log(string.Format("[SimpleSplitter] Numerical search: {0:F3} s.", phase.Elapsed.TotalSeconds));
             yield return PropulsionReader.Refresh(vessel);
@@ -313,7 +320,13 @@ namespace SimpleSplitter
                 RemoveAllNodes(patchedConicSolver);
                 AddNodes(patchedConicSolver, list);
                 patchedConicSolver.UpdateFlightPlan();
-                if (!ValidateCommittedPlan(patchedConicSolver, referenceBody, request.TargetBody, request.OriginalUt, referenceArrival, list.Count, out double actualArrivalUt, out string error))
+                double actualArrivalUt = referenceArrival + candidate.TimedArrivalOffsetSeconds;
+                string error = "KSP did not retain every finite-burn command.";
+                bool retained = candidate.IsConverted
+                    ? NodesMatch(patchedConicSolver.maneuverNodes, list) && CandidateRules.IsFinite(actualArrivalUt)
+                    : ValidateCommittedPlan(patchedConicSolver, referenceBody, request.TargetBody, request.OriginalUt,
+                        referenceArrival, list.Count, out actualArrivalUt, out error);
+                if (!retained)
                 {
                     RestoreSingleNode(patchedConicSolver, original);
                     UnityEngine.Debug.Log("[SimpleSplitter] Candidate rejected: " + error);
@@ -332,7 +345,9 @@ namespace SimpleSplitter
                 }
                 UnityEngine.Debug.Log(string.Format("{0}Setup={1:R} m/s, maximum setup loss={2:R}; departure cosine loss={3:R}, energy loss={4:R}, local position error={5:R} m, local velocity error={6:R} m/s.", "[SimpleSplitter] ", candidate.SetupDeltaV, candidate.MaximumSetupLoss, candidate.DepartureEstimate.CosineLoss, candidate.DepartureEstimate.EnergyLoss, candidate.DepartureEstimate.PositionError, candidate.DepartureEstimate.VelocityError));
                 UnityEngine.Debug.Log(string.Format("{0}Full-sequence finite execution estimate: valid={1}, position error={2:R} m, velocity error={3:R} m/s.", "[SimpleSplitter] ", candidate.ExecutionEstimate.IsFinite, candidate.ExecutionEstimate.PositionError, candidate.ExecutionEstimate.VelocityError));
-                Post(string.Format("Split into {0} nodes; largest timed burn {1:F1} m/s, estimated total {2:F1} m/s, nominal arrival {3}{4:F1} s.", list.Count, candidate.Score.LargestBurn, candidate.Score.TotalDeltaV, (num >= 0.0) ? "+" : string.Empty, num));
+                UnityEngine.Debug.Log(string.Format("[SimpleSplitter] Finite boundary UT={0:R}, position error={1:R} m, velocity error={2:R} m/s, departure pieces={3}.",
+                    candidate.BoundaryEpoch, candidate.TrajectoryError.PositionMeters, candidate.TrajectoryError.VelocityMetersPerSecond, candidate.DeparturePieces));
+                Post(string.Format("Split into {0} nodes; largest timed burn {1:F1} m/s, estimated total {2:F1} m/s, timed arrival {3}{4:F1} s.", list.Count, candidate.Score.LargestBurn, candidate.Score.TotalDeltaV, (num >= 0.0) ? "+" : string.Empty, num));
                 return true;
             }
             catch (Exception ex)
@@ -515,7 +530,7 @@ namespace SimpleSplitter
             for (int i = 0; i < source.Count; i++)
             {
                 NodeSpec nodeSpec = source[i];
-                list.Add(new NodeSpec(nodeSpec.Ut, nodeSpec.DeltaV, nodeSpec.Duration, nodeSpec.StartOffset, nodeSpec.Purpose, nodeSpec.BurnDeltaV));
+                list.Add(new NodeSpec(nodeSpec.Ut, nodeSpec.DeltaV, nodeSpec.Duration, nodeSpec.StartOffset, nodeSpec.Purpose, nodeSpec.BurnDeltaV, nodeSpec.InertialDirection));
             }
             return list;
         }

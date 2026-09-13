@@ -6,7 +6,8 @@ namespace SimpleSplitter
     internal sealed class NodeSpec
     {
         internal NodeSpec(double ut, Vector3d deltaV, double duration = 0.0,
-            double startOffset = 0.0, string purpose = "Maneuver", double burnDeltaV = double.NaN)
+            double startOffset = 0.0, string purpose = "Maneuver", double burnDeltaV = double.NaN,
+            Vector3d? inertialDirection = null)
         {
             Ut = ut;
             DeltaV = deltaV;
@@ -14,6 +15,7 @@ namespace SimpleSplitter
             StartOffset = startOffset;
             Purpose = purpose;
             BurnDeltaV = double.IsNaN(burnDeltaV) ? deltaV.magnitude : burnDeltaV;
+            InertialDirection = inertialDirection;
         }
 
         internal double Ut { get; }
@@ -22,6 +24,10 @@ namespace SimpleSplitter
         internal double StartOffset { get; }
         internal string Purpose { get; }
         internal double BurnDeltaV { get; }
+        // Converted commands are expressed relative to their predicted actual
+        // pre-burn orbit. Preserve the fixed direction independently of the
+        // instantaneous stock preview used when replaying the whole plan.
+        internal Vector3d? InertialDirection { get; }
     }
 
     internal sealed class SplitCandidate
@@ -31,7 +37,8 @@ namespace SimpleSplitter
             CandidateScore score,
             int leadOrbits, double setupDeltaV, double maximumSetupLoss,
             FiniteBurnEstimate departureEstimate, FiniteBurnEstimate executionEstimate, double excessVelocityError, double originalDeltaV,
-            KickSchedule? schedule = null)
+            KickSchedule? schedule = null, SplitCandidate? conversionSeed = null, int departurePieces = 0,
+            TrajectoryError? trajectoryError = null, double boundaryEpoch = double.NaN)
         {
             Nodes = nodes;
             Score = score;
@@ -43,10 +50,20 @@ namespace SimpleSplitter
             ExcessVelocityError = excessVelocityError;
             OriginalDeltaV = originalDeltaV;
             Schedule = schedule;
+            ConversionSeed = conversionSeed;
+            DeparturePieces = departurePieces;
+            TrajectoryError = trajectoryError ?? SimpleSplitter.TrajectoryError.Invalid;
+            BoundaryEpoch = boundaryEpoch;
         }
 
         internal List<NodeSpec> Nodes { get; }
         internal KickSchedule? Schedule { get; }
+        internal SplitCandidate? ConversionSeed { get; }
+        internal int DeparturePieces { get; }
+        internal bool IsConverted => ConversionSeed != null;
+        internal TrajectoryError TrajectoryError { get; }
+        internal double BoundaryEpoch { get; }
+        internal bool MatchesReference => TrajectoryError.MatchesReference;
         internal SplitCandidate? LiveCandidate { get; set; }
         internal CandidateScore Score { get; }
         internal int LeadOrbits { get; }
@@ -65,6 +82,21 @@ namespace SimpleSplitter
 
     internal sealed class SplitRequest
     {
+        private TrajectoryReference? reference;
+        internal TrajectoryReference Reference
+        {
+            get
+            {
+                if (reference == null)
+                {
+                    SourceOrbit.GetFixedState(OriginalUt, out Vector3d r, out Vector3d v);
+                    reference = new TrajectoryReference(SplitPlanner.OrbitFromState(r,
+                        v + (SplitPlanner.NodeRotation(SourceOrbit, OriginalUt) * OriginalDeltaV).xzy,
+                        SourceOrbit.referenceBody, OriginalUt), OriginalUt, ArrivalUt);
+                }
+                return reference;
+            }
+        }
         internal SplitRequest(
             ManeuverNode node,
             CelestialBody targetBody,
@@ -99,6 +131,7 @@ namespace SimpleSplitter
         internal PlanSearchCache Cache { get; }
         internal int MaximumBurns { get; }
         internal string Progress { get; set; } = "Preparing staged burns...";
+        internal string ValidationError { get; set; } = string.Empty;
     }
 
     internal sealed class PlanResult
