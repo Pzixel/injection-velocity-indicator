@@ -255,7 +255,7 @@ namespace SimpleSplitter
         private static double[] Add(double[] x, double[] step, double scale)
         { var result = new double[x.Length]; for (int i = 0; i < x.Length; i++) result[i] = x[i] + scale * step[i]; return result; }
 
-        private static double[] Step(double[,] jacobian, double[] residual, double damping)
+        internal static double[] Step(double[,] jacobian, double[] residual, double damping)
         {
             int n = jacobian.GetLength(1);
             var a = new double[n, n]; var b = new double[n];

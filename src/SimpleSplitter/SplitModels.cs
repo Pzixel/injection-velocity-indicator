@@ -24,9 +24,9 @@ namespace SimpleSplitter
         internal double StartOffset { get; }
         internal string Purpose { get; }
         internal double BurnDeltaV { get; }
-        // Converted commands are expressed relative to their predicted actual
-        // pre-burn orbit. Preserve the fixed direction independently of the
-        // instantaneous stock preview used when replaying the whole plan.
+        // The effective stock impulse may use a different magnitude and node
+        // time. Its coordinates on the real pre-burn orbit still give this
+        // heading. Duration/BurnDeltaV describe thrust, not the map impulse.
         internal Vector3d? InertialDirection { get; }
     }
 
@@ -61,10 +61,11 @@ namespace SimpleSplitter
         internal SplitCandidate? ConversionSeed { get; }
         internal int DeparturePieces { get; }
         internal bool IsConverted => ConversionSeed != null;
-        internal TrajectoryError TrajectoryError { get; }
+        internal TrajectoryError TrajectoryError { get; set; }
         internal double BoundaryEpoch { get; }
         internal bool MatchesReference => TrajectoryError.MatchesReference;
         internal SplitCandidate? LiveCandidate { get; set; }
+        internal ValidatedPlan? Validation { get; set; }
         internal CandidateScore Score { get; }
         internal int LeadOrbits { get; }
         internal double SetupDeltaV { get; }

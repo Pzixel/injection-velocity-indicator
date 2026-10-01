@@ -41,22 +41,26 @@ namespace SimpleSplitter
             if (refreshed == null || !SourceNodeMatches(vessel, request)) { completed(false); yield break; }
             candidate.LiveCandidate = refreshed;
             candidate = refreshed;
-            // Recheck timed safety against the live orbit. Roundoff accepted by
-            // input identity must never exempt the real path from safety checks.
-            Orbit current = vessel.patchedConicSolver.maneuverNodes[0].patch;
-            current.GetFixedState(request.Now, out Vector3d r, out Vector3d v);
-            Orbit liveSource = SplitPlanner.OrbitFromState(r, v, current.referenceBody, request.Now);
+            // Refresh captured the live orbit once for both conversion and its
+            // target. Replaying a second copy reconstructed at Now introduces
+            // a different rounding history over months of resonant coasts.
             // Reject a failed timed execution before constructing stock nodes.
-            // Converted nodes encode commands on the predicted real pre-burn
-            // orbit. Their instantaneous map preview is not a safety oracle.
+            // Validate the physical execution before fitting its stock map.
             bool finiteSafe = false;
-            yield return ValidateFinitePath(vessel, request, candidate, liveSource, value => finiteSafe = value);
+            yield return ValidateFinitePath(vessel, request, candidate, request.SourceOrbit, value => finiteSafe = value);
             if (!finiteSafe || !SourceNodeMatches(vessel, request) ||
                 candidate.Nodes[0].Ut - candidate.Nodes[0].StartOffset <= Planetarium.GetUniversalTime() + 30)
             { completed(false); yield break; }
             if (candidate.IsConverted)
             {
-                completed(CheckCommandNodes(vessel.patchedConicSolver, request, candidate));
+                ValidatedPlan? validation = null;
+                string error = string.Empty;
+                try { validation = new ValidatedPlan(request, candidate); }
+                catch (Exception exception) { error = "Unable to map the finite trajectory: " + exception.Message; }
+                bool plotted = validation != null && CheckCommandNodes(vessel.patchedConicSolver, request, validation, out error);
+                if (plotted) candidate.Validation = validation;
+                else ReportChoiceError(candidate, error);
+                completed(plotted);
                 yield break;
             }
             // Every synchronous prefix check restores the original in finally.
@@ -77,24 +81,33 @@ namespace SimpleSplitter
                 }
                 yield return null;
             }
+            candidate.Validation = new ValidatedPlan(request, candidate);
             completed(true);
         }
 
-        private static bool CheckCommandNodes(PatchedConicSolver solver, SplitRequest request, SplitCandidate candidate)
+        private void ReportChoiceError(SplitCandidate candidate, string error)
         {
-            try
+            choiceErrors[candidate.Nodes.Count] = error;
+            UnityEngine.Debug.Log("[SimpleSplitter] " + candidate.Nodes.Count + "-burn option rejected: " + error);
+        }
+
+        private static bool CheckCommandNodes(PatchedConicSolver solver, SplitRequest request, ValidatedPlan validation, out string error)
+        {
+            string trajectoryError = string.Empty;
+            bool trajectoryValid = false;
+            bool Checked(IList<NodeSpec> specs)
             {
-                RemoveAllNodes(solver);
-                AddNodes(solver, candidate.Nodes);
-                solver.UpdateFlightPlan();
-                return NodesMatch(solver.maneuverNodes, candidate.Nodes);
+                if (!NodesMatch(solver.maneuverNodes, specs)) return false;
+                // The transaction also verifies its one-node restoration.
+                if (specs.Count == 1) return true;
+                trajectoryValid = ValidateCommittedPlan(solver, request.SourceOrbit.referenceBody, request.TargetBody,
+                    request.OriginalUt, request.ArrivalUt, specs.Count, out _, out trajectoryError);
+                return true;
             }
-            catch (Exception exception)
-            {
-                UnityEngine.Debug.Log("[SimpleSplitter] Unable to create finite commands: " + exception.Message);
-                return false;
-            }
-            finally { RestoreSingleNode(solver, new NodeSpec(request.OriginalUt, request.OriginalDeltaV)); }
+            bool result = ManeuverPlanTransaction.Write(new[] { new NodeSpec(request.OriginalUt, request.OriginalDeltaV) }, validation.Nodes,
+                specs => ReplaceNodes(solver, specs), Checked, true, out error);
+            if (result && !trajectoryValid) error = "The mapped stock trajectory failed validation: " + trajectoryError;
+            return result && trajectoryValid;
         }
 
         private static bool CheckPrefix(PatchedConicSolver solver, SplitRequest request, SplitCandidate candidate,
@@ -148,31 +161,29 @@ namespace SimpleSplitter
 
         private IEnumerator ApplyChoice(Vessel vessel, SplitRequest request, SplitCandidate candidate)
         {
-            yield return null;
-            yield return PropulsionReader.Refresh(vessel);
-            StagedPropulsion refreshed = PropulsionReader.Read(vessel, out string propulsionError);
-            if (!SourceNodeMatches(vessel, request) || candidate.Nodes.Count > maximumBurns ||
-                !PlanSearchCache.MatchesPropulsion(request.Propulsion, refreshed))
+            try
+            {
+                yield return null;
+                yield return PropulsionReader.Refresh(vessel);
+                StagedPropulsion propulsion = PropulsionReader.Read(vessel, out string propulsionError);
+                ValidatedPlan? validation = candidate.Validation;
+                string error = "This route has not completed validation. Compare plans again.";
+                if (!SourceNodeMatches(vessel, request))
+                { Post("The vessel or original maneuver changed. Compare plans again."); yield break; }
+                if (!propulsion.IsUsable) { Post(propulsionError); yield break; }
+                if (validation == null || !validation.CanApply(vessel.patchedConicSolver.maneuverNodes[0].patch,
+                    propulsion, maximumBurns, Planetarium.GetUniversalTime(), out error))
+                { Post(error); yield break; }
+                // Commit exactly what this table row already checked. Re-running
+                // RefreshAsync here would solve a different numerical problem
+                // and can discard a valid route due to harmless input jitter.
+                if (!ApplyCandidate(vessel, candidate, out error)) Post(error);
+            }
+            finally
             {
                 planningCoroutine = null;
-                Post(refreshed.IsUsable ? "The vessel, fuel or maneuver changed. Compare plans again." : propulsionError);
-                yield break;
+                activeRequest = null;
             }
-            activeRequest = request;
-            bool safe = false;
-            yield return ValidatePreview(vessel, request, candidate, value => safe = value);
-            yield return PropulsionReader.Refresh(vessel);
-            refreshed = PropulsionReader.Read(vessel, out propulsionError);
-            if (safe && SourceNodeMatches(vessel, request) &&
-                PlanSearchCache.MatchesPropulsion(request.Propulsion, refreshed))
-                ApplyCandidate(vessel, request, candidate.LiveCandidate ?? candidate);
-            else
-            {
-                choices.Remove(candidate.Nodes.Count);
-                searchCache.StockSafety.Remove(candidate);
-                Post(refreshed.IsUsable ? "The option is no longer safe or the vessel changed. Compare plans again." : propulsionError);
-            }
-            planningCoroutine = null;
         }
     }
 }

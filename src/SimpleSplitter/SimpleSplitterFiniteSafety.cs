@@ -62,10 +62,12 @@ namespace SimpleSplitter
                 yield return null;
             }
             TrajectoryError terminal = request.Reference.Measure(executed);
-            if (!terminal.IsFinite || (candidate.IsConverted &&
-                ((terminal.Position - candidate.TrajectoryError.Position).magnitude > .1 ||
-                 (terminal.Velocity - candidate.TrajectoryError.Velocity).magnitude > .0001)))
-            { completed(false); yield break; }
+            if (!terminal.IsFinite)
+            { ReportChoiceError(candidate, "The executed terminal state could not be evaluated."); completed(false); yield break; }
+            // The validated execution is authoritative. It has just passed
+            // all actual burn, coast and encounter checks. Rank its measured
+            // residual; do not veto it for disagreeing with a cached estimate.
+            candidate.TrajectoryError = terminal;
             completed(true);
         }
 

@@ -33,7 +33,8 @@ not stop searches at higher counts. Available rows show:
   total engine-on time and the geometric burn-spread diagnostic.
 - **Arrival shift:** simulated arrival early/late at the target's sphere of
   influence, compared with the live original maneuver. All offered plans pass
-  the arrival window and safety checks; Apply repeats validation.
+  the arrival window and safety checks. Apply plots the exact checked route,
+  after checking that the vessel, fuel and original maneuver still match.
 
 The former "Cosine" column measured the maximum `1 − cos(angle)` between a
 burn's nominal node position and the vessel's position during execution. It
@@ -120,14 +121,16 @@ The key includes source orbit, node vector/time, target, stage order,
 remaining fuel, mass, thrust and exhaust velocity. Changed inputs invalidate
 the cache, and counts whose first burns are now too close are recomputed.
 Float-scale orbital noise is compared near the original capture time instead
-of being amplified by months of extrapolation. Safety is rechecked against the
-live orbit when applying an option; derived encounter-time noise is not an edit.
+of being amplified by months of extrapolation. Each offered option retains its
+checked commands, source snapshot and encounter. Apply verifies the inputs and
+commits those commands without another optimization or encounter search.
 Each new comparison refreshes stock safety results against its current baseline
 while retaining the numerical searches, including completed redistribution.
-For each selected alternative, its cached stage layout, redistribution and
+During comparison, each alternative's cached stage layout, redistribution and
 setup ceiling are reused to refresh resonance timing and burn timers against
-the live orbit. This avoids applying stale timings without repeating the whole
-search across counts and distributions.
+one captured live orbit. Conversion and safety replay share that snapshot.
+Genuine orbit/fuel edits, a changed original node or an expired first burn require
+another comparison; ordinary coasting does not discard an already checked route.
 Cancellation retains completed counts for the next comparison in this flight.
 
 Planning yields between batches of integrations, using a 4 ms time budget and
@@ -135,18 +138,36 @@ at most 16 new integrations per slice. **Cancel calculation** remains available.
 There is no global timeout that prevents later counts from being searched.
 Individual integrations and stock solver calls still run on KSP's main thread.
 
-Converted nodes encode the intended finite command relative to the predicted
-actual orbit before that burn. The instantaneous stock map preview is therefore
-an approximation, and can show a different encounter. Safety follows the actual
-integrated burns and coasts. Command creation is checked separately; the original
-node is restored in `finally` before yielding from temporary previews.
+Converted burns are mapped to effective instantaneous impulses. Their node times
+and magnitudes are fitted to the finite solution's coast positions and outgoing
+state; inserting the full thrust impulse directly would corrupt waiting periods
+and place later departures far from periapsis. The effective node remains within
+its physical burn window and gives the original fixed thrust heading when it is
+the next node on the actual pre-burn orbit. Actual ignition, duration, staging and
+fuel expenditure do not change. Both the real finite path and the mapped stock
+encounter are checked before the option is offered. Apply commits that mapping.
+
+Use the panel's **ignition countdown and full-throttle duration**, not KSP's burn
+time or its suggested start offset. The stock node magnitude is an effective map
+impulse, not the amount of thrust to deliver. At ignition, align to the next node,
+lock inertial attitude, and run its full-throttle timer. Remove the completed node:
+Simple Splitter then refits the remaining map from the vessel's actual orbit,
+without changing the original burn headings or timers. This also handles the
+small differences between the real burnout orbit and the effective impulse.
+Do not keep steering toward the changing residual maneuver marker during a burn.
+
+A single instantaneous impulse cannot generally reproduce a finite burn's full
+position and velocity state. The final remaining node therefore remains an
+approximation even after fitting; the timed execution, rather than zeroing the
+stock node's residual Δv, is what recovers the computed real trajectory.
 
 The finite simulator rejects sampled surface/atmosphere crossings throughout
 thrust. Finalists also sample moon SOIs during each burn and use independent
 stock patched-conic copies to check actual finite coasts for atmosphere entry
 and unintended encounters. Burn windows use the computed start offsets, which
 can be more accurate than assuming a strict 50/50 split around the node.
-Safety is checked again before applying a chosen row. Numerical sampling and
+Preview and Apply share the same transactional command writer. Failed writes
+restore the original maneuver and report the reason. Numerical sampling and
 stock solver precision still limit these predictions.
 
 Extra delta-v and the largest burn are comparison properties, with no hidden
@@ -209,15 +230,15 @@ shortcuts because flight-control bindings such as Shift must remain untouched.
 Simple Splitter leaves the plan unchanged unless all of these conditions hold:
 
 - flight map view is open and the vessel has exactly one maneuver node;
-- the node is in the future, at periapsis (or on a nearly circular orbit), and
-  includes a positive prograde component;
-- the starting and intermediate trajectories remain bound, above the
-  atmosphere, and inside the current body's sphere of influence;
-- the original and generated stock patched-conic plans encounter the same
-  body inside the arrival-time tolerance.
+- the node is sufficiently far in the future and includes a positive prograde
+  component; it need not be exactly at periapsis;
+- the starting and setup trajectories remain bound; all burns and intervening
+  coasts remain above the atmosphere and in the required sphere of influence;
+- the simulated finite trajectory reaches the original target inside the
+  arrival-time tolerance, and KSP retains all checked command nodes.
 
 Failures are reported on screen. Node replacement is transactional: if KSP's
-final patched-conic validation fails, the original node is restored.
+command creation fails, the original node is restored.
 
 Principia is not supported because its trajectories are not represented by
 KSP's stock patched-conic `Orbit` data. The mod detects Principia and disables

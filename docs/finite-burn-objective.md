@@ -190,14 +190,69 @@ just before ignition, lock inertial attitude, and burn at full throttle for the
 specified duration. Do not keep steering toward a changing residual maneuver
 marker. The next burn may have a different fixed direction.
 
-An instantaneous multi-node map preview cannot represent this finite trajectory
-exactly. Accordingly, the validator follows integrated thrust arcs and actual
-coasts, including the initial wait, using independent stock patched-conic copies
-for encounters. It checks the real target arrival and separately checks that KSP
-retains the command nodes. Apply repeats live validation. Undo and temporary
-preview restoration remain transactional.
+The validator follows integrated thrust arcs and actual coasts, including the
+initial wait, using independent stock patched-conic copies for encounters.
+Conversion and safety replay use one captured source orbit. Effective stock nodes
+are fitted separately and their stock encounter is also checked. The validated
+snapshot preserves both finite commands and the checked map; Apply checks for
+input changes and commits that mapping without re-optimizing. Preview and Apply
+share one transactional writer; failed writes restore the original node.
+
+The `AAAA.sfs` regression uses the saved orientation and failed session's logged
+propulsion. It finds matched four-, five- and six-burn paths and verifies that
+the shared headless writer commits each previewed command unchanged. It also
+covers ordinary coast/float jitter, real orbit and fuel changes, expiry, dropped
+commands and partial-write exceptions. Encounter success is supplied from the
+log in that application test; it does not run KSP's patched-conic solver.
 
 Local tests and the production build do not establish live KSP solver behavior
-or pilot accuracy. KSP was not launched and no files were installed into the game.
-User validation should check command retention, sequential attitude/timer
-execution, and the actual resulting encounter on the saved vessel.
+or pilot accuracy. The headless tests do not launch KSP.
+
+## Mapping finite burns to usable stock nodes
+
+The AAAA regression was added and run before implementing the mapping fix:
+
+```
+dotnet run --project tests/SimpleSplitter.Tests -c Release -- --mapping-regression
+```
+
+It initially failed with departure altitude **23,424.329 km**, preceding apoapsis
+**25,185.139 km**, and terminal position error **48,480,884.798 m**. Those were
+computed by applying every published node instantaneously in its preceding stock
+patch, reproducing the screenshot rather than bypassing the public commands.
+
+For a physical burn with ignition s, duration T, thrust integral J, and fixed
+inertial unit direction d, the mapping fits an effective impulse I and node time
+u inside [s, s+T]. The node vector is Q(actual pre-burn orbit, u)^(-1) d I, where Q
+is the game's local maneuver basis (including its coordinate permutation).
+Its stored start offset is u-s; its timer remains T and fuel accounting remains J.
+Thus the next node on the actual orbit commands exactly d, even though I differs
+from the integrated thrust impulse. No extra player maneuvers are introduced.
+
+Earlier impulses fit the position at the next physical ignition, carrying the
+stock state into the next fit. The last two fit the finite trajectory's full
+outgoing state. If that is insufficient, earlier effective impulses join this
+fit, initialized from the already fitted map. This handles inclined departures
+without stage labels, TWR thresholds or new physical steering controls. Each
+fit has a bounded 60 iterations and uses analytic coasts; it does not integrate
+thrust inside the fitting loop.
+
+The six-burn fixture now plots departure at approximately **369 km** and the
+waiting apoapsis at **83,069 km**. Initial plotted terminal position error is
+**0.707 m**, while independent 0.1-second integration of the published headings
+and retained timers preserves the original finite accuracy. Tests also replay
+the saved orientation's four-, five- and six-burn options.
+
+Removing a completed node changes the stock map's starting orbit to the real
+burnout coast. Remaining effective nodes are therefore refitted at that point.
+The regression flies each newly mapped first node with an independent integrator,
+removes it, and repeats; it checks both the remaining map and real terminal state.
+The final single-node map has about **9 km** position discrepancy at the common
+reference epoch (about 0.02% of the reference distance). Two fitting variables
+cannot generally satisfy all the state components of a finite burn; this is a
+representation limit, not an error introduced into the real burn command.
+
+Inclined, antinormal and lunar fixtures also check the instantaneous map and
+independent timed flight. Their local mapping times in this run were roughly
+0.05–4 ms, excluding KSP's own patched-conic checks. These are desktop .NET
+measurements, not Mono frame-time guarantees.

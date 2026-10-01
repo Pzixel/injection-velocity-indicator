@@ -2,14 +2,31 @@
 
 ## 1.2.3
 
+- Fit effective instantaneous node times and magnitudes to the finite solution
+  instead of plotting integrated thrust impulses directly. Preserve every real
+  ignition, duration, fuel budget and fixed heading. Check the mapped stock
+  encounter before offering Apply, and refresh remaining effective nodes after
+  completed burns are removed. Show the actual ignition countdown and distinguish
+  the full-throttle timer from KSP's effective-impulse burn estimate.
+- Reproduce the AAAA apoapsis mapping failure before the fix: departure plotted
+  at 23,424 km instead of near periapsis, with a 48,481 km endpoint error. Add
+  independent impulse-map and timed-flight replays, remaining-node refreshes,
+  inclined/antinormal departures and another departure body.
+- Make Apply commit the exact route that passed comparison, without running
+  the optimizer or encounter search again. Preserve checked commands and arrival
+  in a validation snapshot; still reject genuine input changes or expired burns.
+  Use the same transactional node writer for preview and Apply, with rollback
+  and an explicit failure reason. Add the AAAA.sfs 4/5/6-burn regression.
+- Use one captured live orbit for conversion and safety replay. Rank the
+  measured validated state instead of silently vetoing safe routes over a
+  10 cm discrepancy caused by reconstructing the orbit at a second epoch.
 - Convert candidate departures into finite, fixed-direction burns by matching
   position and velocity to the original trajectory at one common epoch. Rank
   matched plans by total Δv; minimize full-state error when no match is found.
   Allow multiple burns and independently adjusted coasts along the departure,
   within the player's node limit. Use angular spread only to order seed layouts.
 - Re-run conversion on live refresh and rank all checked finalists using their
-  refreshed metrics. Validate the actual timed path and retained command nodes;
-  the instantaneous map preview no longer vetoes a valid finite conversion.
+  refreshed metrics. Validate the actual timed path and its fitted stock map.
 - Add the logged two-stage regression, independent fine-step command replay,
   phase-error and velocity-error counterexamples, and a reproducible comparison
   of full-state, trajectory-RMS and correction-effort objectives.

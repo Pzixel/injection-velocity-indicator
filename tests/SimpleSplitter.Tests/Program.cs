@@ -10,9 +10,16 @@ namespace SimpleSplitter
         {
             if (Array.IndexOf(args, "--conversion-study") >= 0) return FiniteConversionStudy.Run();
             if (Array.IndexOf(args, "--conversion-smoke") >= 0) return FiniteConversionStudy.ConversionSmoke();
+            if (Array.IndexOf(args, "--mapping-regression") >= 0)
+            {
+                ManeuverMappingRegression();
+                return failures == 0 ? 0 : 1;
+            }
             PlanningWorkTests();
             IntegrationRegression();
             FiniteConversionRegression();
+            ApplyPlanRegression();
+            ManeuverMappingRegression();
             TestburnRegression();
             LatestSaveRegression();
             PanelPointerTests();
@@ -233,6 +240,7 @@ namespace SimpleSplitter
             True(cache.GetCandidates(2).Count == 0 && result.Candidates.Exists(c => c.Nodes.Count >= 4),
                 "failed small counts do not prevent larger viable counts");
             True(result.Candidates.Exists(c => c.Nodes.Exists(n => n.Purpose.StartsWith("Plane change"))), "normal component gets plane-change alternatives");
+            CheckMappingVariant(request, result.Candidates.Find(c => c.Nodes.Count == 7 && c.MatchesReference)!, "inclined departure");
             True(result.Candidates.Exists(c => Math.Abs(c.Nodes[0].BurnDeltaV - propulsion.Stages[0].DeltaV) < 1e-6), "short booster stage can finish in one burn");
             var expanded = new SplitRequest(node, body, node.UT + 1e7, 1000, propulsion, 8, cache);
             PlanResult more = RunPlan(expanded)!;
@@ -268,7 +276,9 @@ namespace SimpleSplitter
 
             var fast = StagedPropulsion.Single(new BurnPhysics(100, 12000, 800 * 9.80665));
             var antiNode = new ManeuverNode { patch = source, UT = node.UT, DeltaV = new Vector3d(0.1, -1822.6, 1874) };
-            PlanResult antinormal = RunPlan(new SplitRequest(antiNode, body, node.UT + 1e7, 1000, fast, 4))!;
+            var antiRequest = new SplitRequest(antiNode, body, node.UT + 1e7, 1000, fast, 4);
+            PlanResult antinormal = RunPlan(antiRequest)!;
+            CheckMappingVariant(antiRequest, antinormal.Candidates.Find(c => c.Nodes.Count == 4 && c.MatchesReference)!, "antinormal departure");
             True(antinormal.Candidates.Exists(c => c.Nodes.Exists(n => n.Purpose.StartsWith("Plane change"))),
                 "antinormal high-thrust alternatives remain available");
             foreach (SplitCandidate candidate in antinormal.Candidates) ValidateTimedPlan(source, fast, candidate, antiNode.DeltaV, antiNode.UT);
@@ -276,8 +286,10 @@ namespace SimpleSplitter
             Orbit lunar = SplitPlanner.OrbitFromState(new Vector3d(300000, 0, 0),
                 new Vector3d(0, Math.Sqrt(moon.gravParameter / 300000), 0), moon, 1000);
             var lunarNode = new ManeuverNode { patch = lunar, UT = 1000 + 200 * lunar.period, DeltaV = new Vector3d(0, 220, 600) };
-            PlanResult lunarResult = RunPlan(new SplitRequest(lunarNode, moon, lunarNode.UT + 1e7, 1000,
-                new BurnPhysics(20, 40, 800 * 9.80665), 4))!;
+            var lunarRequest = new SplitRequest(lunarNode, moon, lunarNode.UT + 1e7, 1000,
+                new BurnPhysics(20, 40, 800 * 9.80665), 4);
+            PlanResult lunarResult = RunPlan(lunarRequest)!;
+            CheckMappingVariant(lunarRequest, lunarResult.Candidates.Find(c => c.Nodes.Count == 4 && c.MatchesReference)!, "lunar departure");
             True(lunarResult.Candidates.Count > 0 && lunarResult.Candidates.TrueForAll(c => c.SetupDeltaV < 200),
                 "comparison search uses the departure body's bound-energy budget");
 

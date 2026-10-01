@@ -120,14 +120,26 @@ namespace SimpleSplitter
             }
             else
             {
+                if (undoSnapshot != null && nodeCount > 0 && nodeCount <= undoSnapshot.Generated.Count)
+                {
+                    NodeSpec next = undoSnapshot.Generated[undoSnapshot.Generated.Count - nodeCount];
+                    double ignition = next.Ut - next.StartOffset, now = Planetarium.GetUniversalTime();
+                    string timing = now < ignition
+                        ? string.Format("Ignition in {0:N1} s  |  Burn for {1:F1} s", ignition - now, next.Duration)
+                        : now < ignition + next.Duration
+                            ? string.Format("Burn window: {0:F1} s remaining", ignition + next.Duration - now)
+                            : "Burn window ended. Remove the completed node.";
+                    GUI.Label(new Rect(12, 106, width, 26), new GUIContent(timing,
+                        string.Format("Ignition UT {0:F3}; cutoff UT {1:F3}", ignition, ignition + next.Duration)), headingLabel);
+                }
                 GUI.Label(new Rect(12, 138, width, 26), new GUIContent(
                     string.Format("Δv: {0:F1} → {1:F1} m/s  |  {2} burns",
                         displayedPlan.OriginalDeltaV, displayedPlan.Score.TotalDeltaV, displayedPlan.Nodes.Count),
                     "Original maneuver → total timed split Δv"), headingLabel);
-                Rect viewport = new Rect(12, 198, width, Math.Max(28, panelRect.height - 278));
+                Rect viewport = new Rect(12, 198, width, Math.Max(28, panelRect.height - 294));
                 DrawBurns(displayedPlan, viewport);
-                GUI.Label(new Rect(12, panelRect.height - 70, width, 44),
-                    "Align to the next node at ignition, then lock attitude and burn at full throttle for the timer. Remove that node afterward. Map preview is approximate.", wrappedLabel);
+                GUI.Label(new Rect(12, panelRect.height - 86, width, 60),
+                    "Use the listed ignition and duration, not the stock burn timer. Align to the next node at ignition, lock attitude, and burn at full throttle. Remove it afterward to refresh the map.", wrappedLabel);
                 if (!string.IsNullOrEmpty(GUI.tooltip))
                     GUI.Label(new Rect(12, panelRect.height - 26, width, 22), GUI.tooltip);
             }
@@ -148,10 +160,11 @@ namespace SimpleSplitter
                 new Rect(0, 0, width, Math.Max(viewport.height, plan.Nodes.Count * 28f)), false, true);
             for (int i = 0; i < plan.Nodes.Count; i++)
             {
-                NodeSpec node = plan.Nodes[i];
+                NodeSpec node = undoSnapshot != null && undoSnapshot.Generated.Count == plan.Nodes.Count
+                    ? undoSnapshot.Generated[i] : plan.Nodes[i];
                 float y = i * 28f;
                 GUI.Label(new Rect(0, y, burnWidth, 26), new GUIContent((i + 1) + ". " + BurnLabel(node),
-                    string.Format("Start UT {0:F1}  |  Stock node {1:F1} m/s", node.Ut - node.StartOffset, node.DeltaV.magnitude)));
+                    string.Format("Start UT {0:F1}  |  Effective map impulse {1:F1} m/s", node.Ut - node.StartOffset, node.DeltaV.magnitude)));
                 GUI.Label(new Rect(burnWidth, y, deltaWidth, 26), string.Format("{0:F1} m/s", node.BurnDeltaV), numberLabel);
                 GUI.Label(new Rect(burnWidth + deltaWidth, y, durationWidth, 26), string.Format("{0:F1} s", node.Duration), numberLabel);
             }

@@ -69,6 +69,7 @@ namespace SimpleSplitter
         private void Update()
         {
             Vessel activeVessel = FlightGlobals.ActiveVessel;
+            RefreshRemainingMapping(activeVessel);
             if (displayedPlan != null && (activeVessel == null || undoSnapshot == null || activeVessel.id != undoSnapshot.VesselId || activeVessel.patchedConicSolver == null || !RemainingNodesMatch(activeVessel.patchedConicSolver.maneuverNodes, undoSnapshot.Generated)))
             {
                 displayedPlan = null;
@@ -297,43 +298,31 @@ namespace SimpleSplitter
                 : request.Progress);
         }
 
-        private bool ApplyCandidate(Vessel vessel, SplitRequest request, SplitCandidate candidate)
+        private bool ApplyCandidate(Vessel vessel, SplitCandidate candidate, out string error)
         {
+            error = string.Empty;
+            ValidatedPlan? validation = candidate.Validation;
+            if (validation == null)
+            { error = "The selected route has not completed validation. Compare plans again."; return false; }
             PatchedConicSolver patchedConicSolver = vessel.patchedConicSolver;
-            CelestialBody referenceBody = request.SourceOrbit.referenceBody;
+            SplitRequest request = validation.Request;
             NodeSpec original = new NodeSpec(request.OriginalUt, request.OriginalDeltaV);
-            List<NodeSpec> list = CopySpecs(candidate.Nodes);
-            if (list.Count > request.MaximumBurns)
-            {
-                return false;
-            }
-            if (list[0].Ut - list[0].StartOffset <= Planetarium.GetUniversalTime() + 30.0)
-            {
-                return false;
-            }
+            List<NodeSpec> list = CopySpecs(validation.Nodes);
+            if (!SourceNodeMatches(vessel, request))
+            { error = "The vessel or original maneuver changed. Compare plans again."; return false; }
             try
             {
-                patchedConicSolver.UpdateFlightPlan();
-                if (!TryFindEncounter(patchedConicSolver.maneuverNodes[0].nextPatch,
-                    out CelestialBody? liveTarget, out double referenceArrival) || liveTarget != request.TargetBody)
-                    return false;
-                RemoveAllNodes(patchedConicSolver);
-                AddNodes(patchedConicSolver, list);
-                patchedConicSolver.UpdateFlightPlan();
-                double actualArrivalUt = referenceArrival + candidate.TimedArrivalOffsetSeconds;
-                string error = "KSP did not retain every finite-burn command.";
-                bool retained = candidate.IsConverted
-                    ? NodesMatch(patchedConicSolver.maneuverNodes, list) && CandidateRules.IsFinite(actualArrivalUt)
-                    : ValidateCommittedPlan(patchedConicSolver, referenceBody, request.TargetBody, request.OriginalUt,
-                        referenceArrival, list.Count, out actualArrivalUt, out error);
-                if (!retained)
-                {
-                    RestoreSingleNode(patchedConicSolver, original);
-                    UnityEngine.Debug.Log("[SimpleSplitter] Candidate rejected: " + error);
-                    return false;
-                }
+                // Use the same write operation that Compare successfully tested.
+                // Both finite execution and the mapped stock encounter have
+                // already passed Compare. Never refit on Apply.
+                if (!ManeuverPlanTransaction.Write(new[] { original }, list,
+                    specs => ReplaceNodes(patchedConicSolver, specs), specs => NodesMatch(patchedConicSolver.maneuverNodes, specs),
+                    false, out error)) return false;
+                double referenceArrival = request.ArrivalUt;
+                double actualArrivalUt = validation.ArrivalUt;
                 undoSnapshot = new UndoSnapshot(vessel.id, original, list);
                 displayedPlan = candidate;
+                mappedCompleted = 0;
                 planScroll = Vector2.zero;
                 double num = actualArrivalUt - referenceArrival;
                 double num2 = CandidateRules.ArrivalToleranceSeconds;
@@ -352,6 +341,9 @@ namespace SimpleSplitter
             }
             catch (Exception ex)
             {
+                error = "Unable to apply the checked route: " + ex.Message;
+                undoSnapshot = null;
+                displayedPlan = null;
                 UnityEngine.Debug.LogError("[SimpleSplitter] Failed to apply split: " + ex);
                 try
                 {
@@ -468,6 +460,13 @@ namespace SimpleSplitter
         {
             RemoveAllNodes(solver);
             AddNodes(solver, new List<NodeSpec> { original });
+            solver.UpdateFlightPlan();
+        }
+
+        private static void ReplaceNodes(PatchedConicSolver solver, IList<NodeSpec> specs)
+        {
+            RemoveAllNodes(solver);
+            AddNodes(solver, specs);
             solver.UpdateFlightPlan();
         }
 

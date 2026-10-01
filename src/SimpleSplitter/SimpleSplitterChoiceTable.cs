@@ -20,7 +20,7 @@ namespace SimpleSplitter
                 "Total Δv consumed by the timed burns. Compare with the original maneuver above.",
                 "Extra Δv and percentage of the original maneuver's Δv. Negative means savings; this is not encounter error.",
                 "Longest continuous engine firing, at full throttle. Hover a value for total engine-on time.",
-                "Simulated arrival early/late at the target's sphere of influence, relative to the live original maneuver. Rechecked on Apply.", "" };
+                "Simulated arrival early/late at the target's sphere of influence, relative to the checked original maneuver. Apply uses this exact checked route.", "" };
             float x = 12;
             for (int i = 0; i < headings.Length; i++)
             {
